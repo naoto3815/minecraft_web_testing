@@ -313,7 +313,7 @@
     scene.fog = new THREE.Fog(0x87CEEB, 30, 80);
 
     const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
-    camera.position.set(24, 15, 24);
+    camera.position.set(96, 15, 96);  // 192×192 ワールドの中央
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
@@ -341,38 +341,89 @@
     // ===== ライト =====
     const ambient = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambient);
+    // HemisphereLight: 上から白 / 下からほぼ黒 → 上面と底面の明暗差を最大化
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x080808, 0.7);
+    scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xffffff, 0.8);
     sun.position.set(10, 20, 7);
     scene.add(sun);
 
-    // ===== ブロック管理 =====
-    const blocks = new Map();  // "x,y,z" → Mesh
+    // ===== ブロック管理 (InstancedMesh で大量描画) =====
+    const MAX_INSTANCES_PER_TYPE = 100000;  // 種別ごとの最大インスタンス数
+    const blocks = new Map();           // "x,y,z" → { typeIndex, instanceId }
+    const instancedMeshes = [];         // typeIndex → InstancedMesh
+    const instancePositions = [];       // typeIndex → [instanceId → "x,y,z" key]
     const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    const edgeGeo = new THREE.EdgesGeometry(boxGeo);
-
     const key = (x, y, z) => `${x},${y},${z}`;
+    const _tmpMatrix = new THREE.Matrix4();
+
+    // InstancedMesh をブロック種別ごとに用意
+    blockTypes.forEach((bt, i) => {
+      const im = new THREE.InstancedMesh(boxGeo, bt.material, MAX_INSTANCES_PER_TYPE);
+      im.count = 0;
+      im.userData.typeIndex = i;
+      im.castShadow = false;
+      im.receiveShadow = false;
+      im.frustumCulled = false;  // 全領域常に描画 (個別カリングは内部処理)
+      scene.add(im);
+      instancedMeshes.push(im);
+      instancePositions.push([]);
+    });
 
     function addBlock(x, y, z, typeIndex) {
-      if (blocks.has(key(x, y, z))) return false;
-      const mesh = new THREE.Mesh(boxGeo, blockTypes[typeIndex].material);
-      mesh.position.set(x, y, z);
-      mesh.userData.typeIndex = typeIndex;
-      // 輪郭線は描かない → 面の陰影だけで立体感を出す本家風
-      scene.add(mesh);
-      blocks.set(key(x, y, z), mesh);
+      const k = key(x, y, z);
+      if (blocks.has(k)) return false;
+      const im = instancedMeshes[typeIndex];
+      const positions = instancePositions[typeIndex];
+      const id = im.count;
+      if (id >= MAX_INSTANCES_PER_TYPE) {
+        console.warn('Max instances reached for type', typeIndex);
+        return false;
+      }
+      _tmpMatrix.makeTranslation(x, y, z);
+      im.setMatrixAt(id, _tmpMatrix);
+      im.count = id + 1;
+      im.instanceMatrix.needsUpdate = true;
+      positions[id] = k;
+      blocks.set(k, { typeIndex, instanceId: id });
       return true;
     }
 
     function removeBlock(x, y, z) {
-      const mesh = blocks.get(key(x, y, z));
-      if (!mesh) return;
-      scene.remove(mesh);
-      // material は blockTypes 間で共有しているので dispose しない
-      blocks.delete(key(x, y, z));
+      const k = key(x, y, z);
+      const entry = blocks.get(k);
+      if (!entry) return;
+      const im = instancedMeshes[entry.typeIndex];
+      const positions = instancePositions[entry.typeIndex];
+      const lastId = im.count - 1;
+      if (entry.instanceId !== lastId) {
+        // swap-remove: 末尾を空きスロットに移動
+        im.getMatrixAt(lastId, _tmpMatrix);
+        im.setMatrixAt(entry.instanceId, _tmpMatrix);
+        const movedKey = positions[lastId];
+        if (movedKey && blocks.has(movedKey)) {
+          blocks.get(movedKey).instanceId = entry.instanceId;
+          positions[entry.instanceId] = movedKey;
+        }
+      }
+      positions[lastId] = undefined;
+      im.count = lastId;
+      im.instanceMatrix.needsUpdate = true;
+      blocks.delete(k);
     }
 
-    // ===== 地形生成 (48×48, SimplexNoise 4オクターブ) =====
-    const GROUND = 48;
+    // ヘルパー: InstancedMesh の hit から (x, y, z) を取り出す
+    function blockFromHit(hit) {
+      const ti = hit.object.userData.typeIndex;
+      if (ti === undefined) return null;
+      const posKey = instancePositions[ti][hit.instanceId];
+      if (!posKey) return null;
+      const [bx, by, bz] = posKey.split(',').map(Number);
+      return { x: bx, y: by, z: bz, typeIndex: ti, posKey };
+    }
+
+    // ===== 地形生成 (192×192, SimplexNoise 4オクターブ) =====
+    const GROUND = 192;
 
     // 高さ用ノイズ (4オクターブのフラクタル合成)
     const heightNoise = createNoise2D();
@@ -445,11 +496,12 @@
       addBlock(x, top + 2, z, 5);
     }
 
-    const TREE_CHANCE = 0.015;  // 土の上にだけ生やす
+    const TREE_CHANCE = 0.006;  // 192×192の広い世界で約220本程度
+    const SPAWN_CX = 96, SPAWN_CZ = 96;
     for (let z = 3; z < GROUND - 3; z++) {
       for (let x = 3; x < GROUND - 3; x++) {
-        // プレイヤー初期位置 (24, 24) 付近は避ける
-        if (Math.abs(x - 24) < 3 && Math.abs(z - 24) < 3) continue;
+        // プレイヤー初期位置 (96, 96) 付近は避ける
+        if (Math.abs(x - SPAWN_CX) < 4 && Math.abs(z - SPAWN_CZ) < 4) continue;
         if (getSurfaceType(x, z) !== 1) continue;  // 土のみ
         if (Math.random() < TREE_CHANCE) {
           plantTree(x, terrainHeight(x, z), z);
@@ -458,7 +510,9 @@
     }
 
     // 初期スポーン位置を実際の地面に合わせる (初期落下を防ぐ)
-    camera.position.y = terrainHeight(24, 24) + 2;
+    camera.position.y = terrainHeight(SPAWN_CX, SPAWN_CZ) + 2;
+    camera.position.x = SPAWN_CX;
+    camera.position.z = SPAWN_CZ;
 
     // ===== 一人称コントロール =====
     const controls = new PointerLockControls(camera, document.body);
@@ -701,7 +755,8 @@
 
     // 破壊長押し用の状態
     let mouseDown = false;
-    let breakTarget = null;
+    let breakTargetKey = null;   // 対象ブロックの位置キー "x,y,z"
+    let breakTargetType = null;  // 対象ブロックの種別
     let breakProgress = 0;
     const breakBarEl = document.getElementById('breakbar');
     const breakFillEl = document.getElementById('breakfill');
@@ -709,12 +764,11 @@
     addEventListener('mousedown', (e) => {
       if (!controls.isLocked) return;
       raycaster.setFromCamera(centerScreen, camera);
-      // Block と Creeper を別レイキャスト (Creeper はGLBの深い階層なので recursive=true)
-      const blockHits = raycaster.intersectObjects([...blocks.values()], false);
+      // Block (InstancedMesh) と Creeper を別レイキャスト
+      const blockHits = raycaster.intersectObjects(instancedMeshes, false);
       const creeperHits = raycaster.intersectObjects(creepers, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
-      // 手前のヒットを採用
       let hit, isCreeper = false;
       if (ch && (!bh || ch.distance < bh.distance)) { hit = ch; isCreeper = true; }
       else if (bh) hit = bh;
@@ -723,7 +777,6 @@
       // クリーパー
       if (isCreeper) {
         if (e.button === 0) {
-          // 親グループを探す (GLBは階層深い)
           let g = hit.object;
           while (g && !creepers.includes(g)) g = g.parent;
           if (g) {
@@ -734,19 +787,21 @@
         return;
       }
 
-      // ブロック
+      // ブロック (InstancedMesh から位置情報を取り出す)
+      const info = blockFromHit(hit);
+      if (!info) return;
+
       if (e.button === 0) {
         mouseDown = true;
         mineStrikeCount = 0;
         startHandSwing();
       } else if (e.button === 2) {
         if (inventory[selectedBlock] <= 0) return;
-        const p = hit.object.position;
         const n = hit.face.normal;
         if (addBlock(
-          Math.round(p.x + n.x),
-          Math.round(p.y + n.y),
-          Math.round(p.z + n.z),
+          Math.round(info.x + n.x),
+          Math.round(info.y + n.y),
+          Math.round(info.z + n.z),
           selectedBlock
         )) {
           inventory[selectedBlock]--;
@@ -759,7 +814,8 @@
     addEventListener('mouseup', (e) => {
       if (e.button !== 0) return;
       mouseDown = false;
-      breakTarget = null;
+      breakTargetKey = null;
+      breakTargetType = null;
       breakProgress = 0;
       breakBarEl.style.display = 'none';
     });
@@ -815,29 +871,90 @@
     function spawnCreeper(x, z) {
       let group;
       if (creeperModelTemplate) {
-        // GLB モデルを clone (Object3D.clone は geometry/material を共有してメモリ節約)
         group = creeperModelTemplate.clone(true);
-        // 深いメッシュ階層なのでクリック判定用にすべての子に userData をセット
-        group.traverse((obj) => { if (obj.isMesh) obj.userData.creeperGroup = group; });
       } else {
         // GLB ロード前 or 失敗時の箱型フォールバック
         group = new THREE.Group();
         const body = new THREE.Mesh(creeperBodyGeo, creeperBodyMat);
         body.position.y = 0.5;
-        body.userData.creeperGroup = group;
         group.add(body);
         const head = new THREE.Mesh(creeperHeadGeo, creeperFaceMat);
         head.position.y = 1.4;
-        head.userData.creeperGroup = group;
         group.add(head);
       }
+      // 個別フラッシュのため、各メッシュのマテリアルをこの個体専用にクローン
+      group.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.userData.creeperGroup = group;
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map(m => m.clone());
+          obj.userData.origColors = obj.material.map(m => m.color.clone());
+        } else if (obj.material) {
+          obj.material = obj.material.clone();
+          obj.userData.origColors = [obj.material.color.clone()];
+        }
+      });
       const y = creeperGroundY(x, z);
       group.position.set(x, y !== null ? y : 5, z);
       scene.add(group);
       creepers.push(group);
     }
 
+    // 白フラッシュ: intensity 0=元の色, 1=完全白
+    function setCreeperFlash(group, intensity) {
+      group.traverse((obj) => {
+        if (!obj.isMesh || !obj.userData.origColors) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const origs = obj.userData.origColors;
+        for (let i = 0; i < mats.length; i++) {
+          const orig = origs[i];
+          mats[i].color.setRGB(
+            orig.r + (1 - orig.r) * intensity,
+            orig.g + (1 - orig.g) * intensity,
+            orig.b + (1 - orig.b) * intensity,
+          );
+        }
+      });
+    }
+
+    // シュー音 (起爆中) - Web Audio API のホワイトノイズ + ハイパス
+    function startCreeperHiss(c) {
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * (FUSE_DURATION + 0.2)), ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 3500;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.04, now);
+      gain.gain.linearRampToValueAtTime(0.25, now + FUSE_DURATION);
+      src.connect(filter).connect(gain).connect(ctx.destination);
+      src.start(now);
+      c.userData.hissSrc = src;
+      c.userData.hissGain = gain;
+    }
+
+    function stopCreeperHiss(c) {
+      if (!c.userData.hissSrc) return;
+      const ctx = getAudioCtx();
+      const now = ctx.currentTime;
+      try {
+        c.userData.hissGain.gain.cancelScheduledValues(now);
+        c.userData.hissGain.gain.setValueAtTime(c.userData.hissGain.gain.value, now);
+        c.userData.hissGain.gain.linearRampToValueAtTime(0, now + 0.05);
+        c.userData.hissSrc.stop(now + 0.08);
+      } catch (e) {/* 既に停止 */}
+      c.userData.hissSrc = null;
+      c.userData.hissGain = null;
+    }
+
     function killCreeper(group) {
+      stopCreeperHiss(group);  // 撃破時もシュー音停止
       scene.remove(group);
       const idx = creepers.indexOf(group);
       if (idx !== -1) creepers.splice(idx, 1);
@@ -845,9 +962,12 @@
 
     // GLB モデルを非同期ロード → 完了後に初期スポーン
     function spawnInitialCreepers() {
-      spawnCreeper(8, 8);
-      spawnCreeper(40, 12);
-      spawnCreeper(15, 40);
+      // 広いワールドなので少し多めに、プレイヤー(96,96)から半径15-40の範囲に散らす
+      const positions = [
+        [82, 88], [110, 92], [98, 115], [75, 105], [120, 105],
+        [95, 75], [115, 75], [85, 120], [125, 125], [70, 80],
+      ];
+      for (const [cx, cz] of positions) spawnCreeper(cx, cz);
     }
     const gltfLoader = new GLTFLoader();
     gltfLoader.load(
@@ -966,6 +1086,7 @@
     }
 
     function explodeCreeper(c, index) {
+      stopCreeperHiss(c);  // シュー音停止
       const cx = c.position.x;
       const cy = c.position.y + 0.9;  // 体の中心
       const cz = c.position.z;
@@ -1014,27 +1135,28 @@
         const fuseTime = c.userData.fuseTime || 0;
         if (fuseTime > 0) {
           const nt = fuseTime + dt;
-          // 視覚: スケール膨張 (1 → 1.4)
-          const swell = 1 + Math.min(0.4, nt * 0.3);
-          c.scale.setScalar(swell);
-          // タイマー完了 → 爆発
+          const progressNorm = Math.min(1, nt / FUSE_DURATION);
+          // 加速するパルス (6Hz → 30Hz)
+          const pulseFreq = 6 + progressNorm * 24;
+          const pulse = Math.abs(Math.sin(nt * pulseFreq));
+          // スケール: ベース成長 + パルス揺れ
+          const baseScale = 1 + progressNorm * 0.3;
+          c.scale.setScalar(baseScale + pulse * 0.12);
+          // 白フラッシュ: 後半ほど明るく
+          setCreeperFlash(c, pulse * (0.25 + progressNorm * 0.7));
+          // タイマー完了 → 爆発 (キャンセル不可、必ず爆発)
           if (nt >= FUSE_DURATION) {
             explodeCreeper(c, i);
             continue;
           }
-          // 遠ざかったらキャンセル
-          if (dist > FUSE_CANCEL_RANGE) {
-            c.userData.fuseTime = 0;
-            c.scale.setScalar(1);
-          } else {
-            c.userData.fuseTime = nt;
-          }
+          c.userData.fuseTime = nt;
           continue;  // 起爆中は移動しない
         }
 
         // 近距離に入ったら起爆開始 (Y方向に大きく離れていなければ)
         if (dist < FUSE_RANGE && Math.abs(dy) < 3) {
           c.userData.fuseTime = 0.001;
+          startCreeperHiss(c);
           continue;
         }
 
@@ -1101,12 +1223,14 @@
 
       // 太陽の強さ (地平線下では0)
       const sunHeight = Math.max(0, Math.sin(angle));
-      sun.intensity = sunHeight * 1.0;
+      sun.intensity = sunHeight * 1.2;
       // 日の出/日没で暖色に
       sun.color.setHex(sunHeight > 0.01 && sunHeight < 0.3 ? 0xffaa66 : 0xffffff);
 
-      // 環境光: 昼でも少し抑え目にして「面の陰影」を立たせる (本家風)
-      ambient.intensity = 0.3 + sunHeight * 0.15;
+      // 環境光: 控えめに (Hemisphereに面の陰影を任せる)
+      ambient.intensity = 0.18 + sunHeight * 0.1;
+      // 空からの光: 太陽角度に関わらず上面が明るくなる
+      hemi.intensity = 0.4 + sunHeight * 0.6;
 
       // 空とフォグの色
       const skyC = getSkyColor(timeOfDay);
@@ -1331,7 +1455,8 @@
           } else if (t.identifier === lookId) {
             lookId = null;
             mouseDown = false;
-            breakTarget = null;
+            breakTargetKey = null;
+            breakTargetType = null;
             breakProgress = 0;
             breakBarEl.style.display = 'none';
           }
@@ -1354,15 +1479,15 @@
         if (!controls.isLocked) return;
         if (inventory[selectedBlock] <= 0) return;
         raycaster.setFromCamera(centerScreen, camera);
-        const hits = raycaster.intersectObjects([...blocks.values()], false);
+        const hits = raycaster.intersectObjects(instancedMeshes, false);
         if (hits.length === 0 || hits[0].distance > 8) return;
-        const hit = hits[0];
-        const p = hit.object.position;
-        const n = hit.face.normal;
+        const info = blockFromHit(hits[0]);
+        if (!info) return;
+        const n = hits[0].face.normal;
         if (addBlock(
-          Math.round(p.x + n.x),
-          Math.round(p.y + n.y),
-          Math.round(p.z + n.z),
+          Math.round(info.x + n.x),
+          Math.round(info.y + n.y),
+          Math.round(info.z + n.z),
           selectedBlock
         )) {
           inventory[selectedBlock]--;
@@ -1411,6 +1536,24 @@
         // 重力
         velocityY += GRAVITY * dt;
         camera.position.y += velocityY * dt;
+
+        // 天井判定: ジャンプ中に頭をぶつけたら上昇を打ち消す
+        if (velocityY > 0) {
+          let bonk = false;
+          for (const dx of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+            for (const dz of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+              if (hasCeiling(camera.position.x + dx, camera.position.z + dz, camera.position.y)) {
+                bonk = true; break;
+              }
+            }
+            if (bonk) break;
+          }
+          if (bonk) {
+            // 直前のYに戻して上昇キャンセル + 軽く跳ね返り
+            camera.position.y -= velocityY * dt;
+            velocityY = Math.min(velocityY, -0.5);
+          }
+        }
 
         // 段差を「登る」or「着地」
         const floorY = getFloorY(camera.position.x, camera.position.z);
@@ -1463,29 +1606,31 @@
         // ブロック破壊の進行 (左クリック長押し)
         if (mouseDown) {
           raycaster.setFromCamera(centerScreen, camera);
-          const hits = raycaster.intersectObjects([...blocks.values()], false);
-          const aimed = (hits.length > 0 && hits[0].distance <= 8) ? hits[0].object : null;
-          if (aimed) {
-            if (aimed !== breakTarget) {
-              breakTarget = aimed;
+          const hits = raycaster.intersectObjects(instancedMeshes, false);
+          const hit = (hits.length > 0 && hits[0].distance <= 8) ? hits[0] : null;
+          const info = hit ? blockFromHit(hit) : null;
+          if (info) {
+            if (info.posKey !== breakTargetKey) {
+              breakTargetKey = info.posKey;
+              breakTargetType = info.typeIndex;
               breakProgress = 0;
             }
-            const ti = aimed.userData.typeIndex ?? 0;
-            const hardness = blockTypes[ti].hardness;
+            const hardness = blockTypes[info.typeIndex].hardness;
             breakProgress += dt;
             breakBarEl.style.display = 'block';
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
             if (breakProgress >= hardness) {
-              const p = aimed.position;
-              inventory[ti]++;          // 壊したブロックを入手
+              inventory[info.typeIndex]++;
               updateHotbar();
-              removeBlock(p.x, p.y, p.z);
-              breakTarget = null;
+              removeBlock(info.x, info.y, info.z);
+              breakTargetKey = null;
+              breakTargetType = null;
               breakProgress = 0;
               breakBarEl.style.display = 'none';
             }
           } else {
-            breakTarget = null;
+            breakTargetKey = null;
+            breakTargetType = null;
             breakProgress = 0;
             breakBarEl.style.display = 'none';
           }
@@ -1505,7 +1650,7 @@
           const peakCount = Math.floor((handTime + Math.PI / 2) / Math.PI);
           if (peakCount > mineStrikeCount) {
             mineStrikeCount = peakCount;
-            if (breakTarget) playMineSound(breakTarget.userData.typeIndex ?? 0);
+            if (breakTargetType !== null) playMineSound(breakTargetType);
           }
         } else if (handSwingT > 0) {
           // 単発スイング (設置・敵撃破時)
