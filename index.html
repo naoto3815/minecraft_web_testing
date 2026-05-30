@@ -205,8 +205,8 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { createNoise2D } from 'https://cdn.skypack.dev/simplex-noise@4';
 
-    // タッチデバイス検出 (iPhone/iPad等)
-    const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window);
+    // タッチデバイス検出 (iPhone/iPad等)。?touch=1 で強制 (PC でのUI確認用)
+    const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window) || location.search.includes('touch');
     if (isTouch) {
       document.body.classList.add('touch');
       const sm = document.getElementById('startmsg');
@@ -657,19 +657,49 @@
     // ===== 一人称コントロール =====
     const controls = new PointerLockControls(camera, document.body);
     const startMsg = document.getElementById('startmsg');
+
+    // Pointer Lock が取得できない環境(埋め込み/一部ブラウザ/タッチ等)向けの
+    // フォールバック。controls.isLocked=true にすると PointerLockControls の
+    // onMouseMove はマウス移動でカメラを回すので、実ロック無しでも操作できる。
+    let usingFallback = false;
+
+    // 実ロック・フォールバック共通の「プレイ開始」処理
+    function beginPlay() {
+      startMsg.style.display = 'none';
+      controls.isLocked = true;
+      document.body.style.cursor = 'none';
+      if (typeof bgmMuted !== 'undefined' && !bgmMuted) bgm.play().catch(() => {});
+      if (typeof getAudioCtx === 'function') getAudioCtx();  // 効果音の準備
+    }
+
+    function startFallback() {
+      if (controls.isLocked) return;  // 既にロック済みなら何もしない
+      usingFallback = true;
+      beginPlay();
+    }
+
     startMsg.addEventListener('click', () => {
       if (isTouch) {
         // タッチではPointerLockが使えないので手動でアクティブ化
-        startMsg.style.display = 'none';
-        controls.isLocked = true;
-        if (typeof bgmMuted !== 'undefined' && !bgmMuted) bgm.play().catch(() => {});
-        if (typeof getAudioCtx === 'function') getAudioCtx();  // 効果音の準備
+        startFallback();
       } else {
         controls.lock();
+        // Pointer Lock が失敗した場合(埋め込み環境など)のセーフティネット。
+        // 'lock' が発火していなければフォールバックでプレイ可能にする。
+        setTimeout(() => { if (!controls.isLocked) startFallback(); }, 400);
       }
     });
-    controls.addEventListener('lock', () => startMsg.style.display = 'none');
-    controls.addEventListener('unlock', () => startMsg.style.display = 'block');
+    // Pointer Lock の要求が即エラーになるケースにも対応
+    document.addEventListener('pointerlockerror', startFallback);
+
+    controls.addEventListener('lock', () => {
+      startMsg.style.display = 'none';
+      document.body.style.cursor = 'none';
+    });
+    controls.addEventListener('unlock', () => {
+      document.body.style.cursor = '';
+      if (!usingFallback) startMsg.style.display = 'block';
+    });
 
     // ===== BGM =====
     // BGM/ フォルダ内のファイルを指定。複数あれば起動時にランダム選択。
@@ -1869,6 +1899,7 @@
 
       renderer.render(scene, camera);
     }
+
     animate();
 
     // ===== リサイズ対応 =====
