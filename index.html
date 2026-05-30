@@ -157,6 +157,43 @@
     }
     #touch-buttons button:active { background: rgba(255,255,255,0.45); }
     body.touch #info { font-size: 11px; max-width: 60vw; }
+
+    /* ===== スマホ操作 (リモートコントローラー) ===== */
+    #remote-btn {
+      position: absolute; top: 12px; right: 12px; z-index: 20;
+      padding: 8px 12px; font-size: 13px; font-family: inherit;
+      background: rgba(0,0,0,0.45); color: #fff; cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.35); border-radius: 8px;
+    }
+    #remote-btn:hover { background: rgba(0,0,0,0.65); }
+    #remote-panel {
+      display: none; position: absolute; top: 0; right: 0; bottom: 0; z-index: 40;
+      width: 320px; max-width: 90vw; padding: 20px;
+      background: rgba(20,22,28,0.96); color: #fff; font-size: 13px; line-height: 1.6;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.5); overflow-y: auto;
+    }
+    #remote-panel.open { display: block; }
+    #remote-panel h3 { margin: 4px 0 12px; font-size: 16px; }
+    #remote-panel p { margin: 8px 0; color: #c8d0dc; }
+    #remote-close {
+      position: absolute; top: 10px; right: 14px; font-size: 22px; cursor: pointer; color: #aaa;
+    }
+    #remote-close:hover { color: #fff; }
+    #remote-qr {
+      display: block; width: 200px; height: 200px; margin: 12px auto;
+      background: #fff; border-radius: 8px;
+    }
+    #remote-url {
+      word-break: break-all; background: rgba(255,255,255,0.08);
+      padding: 8px; border-radius: 6px; font-size: 12px; margin: 8px 0;
+    }
+    #remote-code { font-size: 15px; margin: 8px 0; }
+    #remote-code b { font-size: 22px; letter-spacing: 3px; color: #ffd54a; }
+    #remote-status { margin-top: 12px; font-weight: bold; }
+    #remote-status.ok { color: #5ad15a; }
+    #remote-status.wait { color: #ffd54a; }
+    #remote-status.err { color: #e87070; }
+    #remote-panel .hint { font-size: 11px; color: #8a92a0; }
   </style>
 </head>
 <body>
@@ -181,6 +218,21 @@
   <div id="gameover">
     <div>GAME OVER</div>
     <button onclick="location.reload()">リトライ</button>
+  </div>
+
+  <!-- スマホをコントローラーにする (node server.js で起動した時に使える) -->
+  <button id="remote-btn" type="button">📱 スマホで操作</button>
+  <div id="remote-panel">
+    <span id="remote-close">×</span>
+    <h3>📱 スマホをコントローラーに</h3>
+    <p>同じ Wi-Fi のスマホで下の QR を読み取るか、部屋コードを入力してください。</p>
+    <img id="remote-qr" alt="QRコード">
+    <div id="remote-url"></div>
+    <div id="remote-code">部屋コード: <b>----</b></div>
+    <div id="remote-status" class="wait">準備中…</div>
+    <p class="hint">※ このページは <b>localhost</b> ではなく PC の IP アドレス
+      (例 http://192.168.x.x:8000/) で開いてください。<br>
+      ※ <code>node server.js</code> で起動している必要があります。</p>
   </div>
 
   <!-- タッチデバイス専用UI (CSS で body.touch のみ表示) -->
@@ -1496,6 +1548,172 @@
         }
       }, { passive: false });
     }
+
+    // ===== スマホ操作 (リモートコントローラー) =====
+    // node server.js で起動した時のみ動作。スマホ(controller.html)からの入力を
+    // 受け取り、キーボード/マウスと同じゲーム状態 (move / velocityY / selectedBlock 等)
+    // を直接動かす。
+    (function setupRemoteControl() {
+      const btn = document.getElementById('remote-btn');
+      const panel = document.getElementById('remote-panel');
+      const closeBtn = document.getElementById('remote-close');
+      const qrImg = document.getElementById('remote-qr');
+      const urlEl = document.getElementById('remote-url');
+      const codeEl = document.querySelector('#remote-code b');
+      const statusEl = document.getElementById('remote-status');
+
+      // 4文字の部屋コード (紛らわしい文字は除外)
+      const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let room = '';
+      for (let i = 0; i < 4; i++) room += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+
+      const ctrlUrl = `${location.origin}/controller.html?room=${room}`;
+      let ws = null;
+      let controllerCount = 0;
+
+      function setStatus(text, cls) {
+        statusEl.textContent = text;
+        statusEl.className = cls || '';
+      }
+
+      // 視点回転 (タッチUIと同じ YXZ Euler 方式)
+      const remoteEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+      function applyLook(dx, dy) {
+        const ROT = 0.004;
+        remoteEuler.setFromQuaternion(camera.quaternion);
+        remoteEuler.y -= dx * ROT;
+        remoteEuler.x -= dy * ROT;
+        remoteEuler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, remoteEuler.x));
+        camera.quaternion.setFromEuler(remoteEuler);
+      }
+
+      let remoteDash = false;
+      function applyMove(x, y) {
+        const T = 0.35;
+        move.r = x > T;
+        move.l = x < -T;
+        move.f = y > T;
+        move.b = y < -T;
+        isDashing = remoteDash && move.f;  // 前進中のみダッシュ有効
+      }
+
+      function remotePlace() {
+        if (inventory[selectedBlock] <= 0) return;
+        raycaster.setFromCamera(centerScreen, camera);
+        const hits = raycaster.intersectObjects(instancedMeshes, false);
+        if (hits.length === 0 || hits[0].distance > 8) return;
+        const info = blockFromHit(hits[0]);
+        if (!info) return;
+        const n = hits[0].face.normal;
+        if (addBlock(
+          Math.round(info.x + n.x),
+          Math.round(info.y + n.y),
+          Math.round(info.z + n.z),
+          selectedBlock
+        )) {
+          inventory[selectedBlock]--;
+          updateHotbar();
+          startHandSwing();
+        }
+      }
+
+      // スマホが繋がったらゲームを開始状態にする (タッチ操作の開始処理と同じ)
+      function activateGame() {
+        if (controls.isLocked) return;
+        startMsg.style.display = 'none';
+        controls.isLocked = true;
+        if (!bgmMuted) bgm.play().catch(() => {});
+        if (typeof getAudioCtx === 'function') getAudioCtx();
+      }
+
+      function handleInput(m) {
+        if (!controls.isLocked) activateGame();
+        switch (m.t) {
+          case 'm': applyMove(m.x || 0, m.y || 0); break;
+          case 'l': applyLook(m.dx || 0, m.dy || 0); break;
+          case 'j': if (onGround) velocityY = JUMP; break;
+          case 'b':
+            if (m.on) { mouseDown = true; mineStrikeCount = 0; startHandSwing(); }
+            else { mouseDown = false; breakBarEl.style.display = 'none'; }
+            break;
+          case 'p': remotePlace(); break;
+          case 's':
+            if (m.i >= 0 && m.i < blockTypes.length) {
+              selectedBlock = m.i; updateBlockInfo(); updateHotbar(); sendHud();
+            }
+            break;
+          case 'd': remoteDash = !!m.on; isDashing = remoteDash && move.f; break;
+        }
+      }
+
+      // スマホ側へ HUD (HP・ホットバー) を送る
+      function sendHud() {
+        if (!ws || ws.readyState !== 1 || controllerCount === 0) return;
+        ws.send(JSON.stringify({
+          t: 'hud',
+          hp: playerHP, max: PLAYER_MAX_HP, sel: selectedBlock,
+          blocks: blockTypes.map((bt, i) => ({ name: bt.name, count: inventory[i] })),
+        }));
+      }
+      setInterval(sendHud, 500);
+
+      function connect() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        setStatus('サーバーに接続中…', 'wait');
+        try {
+          ws = new WebSocket(`${proto}//${location.host}/ws`);
+        } catch (e) {
+          setStatus('接続失敗 (node server.js で起動してください)', 'err');
+          return;
+        }
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ t: 'join', room, role: 'host' }));
+          setStatus('スマホの接続待ち…', 'wait');
+        };
+        ws.onmessage = (ev) => {
+          let m; try { m = JSON.parse(ev.data); } catch { return; }
+          if (m.t === 'peer' && m.role === 'controller') {
+            if (m.event === 'join') {
+              controllerCount++;
+              setStatus('✓ スマホが接続しました', 'ok');
+              activateGame();
+              sendHud();
+            } else if (m.event === 'leave') {
+              controllerCount = Math.max(0, controllerCount - 1);
+              if (controllerCount === 0) {
+                move.f = move.b = move.l = move.r = false;
+                mouseDown = false;
+                setStatus('スマホが切断 — 再接続待ち', 'wait');
+              }
+            }
+            return;
+          }
+          handleInput(m);
+        };
+        ws.onclose = () => {
+          setStatus('サーバーから切断', 'err');
+        };
+        ws.onerror = () => {
+          setStatus('接続エラー (node server.js で起動が必要)', 'err');
+        };
+      }
+
+      // パネル表示。初回オープン時に接続を試みる。
+      let started = false;
+      function openPanel() {
+        panel.classList.add('open');
+        codeEl.textContent = room;
+        urlEl.textContent = ctrlUrl;
+        qrImg.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=8&data=' +
+          encodeURIComponent(ctrlUrl);
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+          setStatus('⚠ localhost ではスマホから繋げません。PCのIPで開いてください', 'err');
+        }
+        if (!started) { started = true; connect(); }
+      }
+      btn.addEventListener('click', openPanel);
+      closeBtn.addEventListener('click', () => panel.classList.remove('open'));
+    })();
 
     // ===== ゲームループ =====
     const clock = new THREE.Clock();

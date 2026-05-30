@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>スマホコントローラー</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden;
+    background: #15171c; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  #status {
+    position: fixed; top: 0; left: 0; right: 0; height: 46px;
+    display: flex; align-items: center; gap: 12px; padding: 0 12px;
+    background: rgba(0,0,0,.45); font-size: 13px; z-index: 30;
+  }
+  #dot { width: 11px; height: 11px; border-radius: 50%; background: #e05050; flex: none; transition: background .2s; }
+  #dot.ok { background: #5ad15a; }
+  #statustext { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  #hp { font-weight: bold; }
+  #hp .heart { color: #ff5b5b; }
+
+  /* 接続前のオーバーレイ */
+  #overlay {
+    position: fixed; inset: 0; z-index: 40; background: #15171c;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 24px; text-align: center;
+  }
+  #overlay h1 { font-size: 20px; margin: 0; }
+  #overlay p { font-size: 14px; color: #b8c0cc; margin: 0; line-height: 1.6; }
+  #overlay.hidden { display: none; }
+  #connectBtn {
+    margin-top: 8px; padding: 16px 32px; font-size: 17px; font-weight: bold;
+    border: none; border-radius: 12px; background: #4CAF50; color: #fff;
+  }
+  #roomInput {
+    padding: 12px; font-size: 18px; text-align: center; letter-spacing: 4px;
+    width: 160px; border-radius: 10px; border: 2px solid #3a3f48; background: #1e2127; color: #fff;
+    text-transform: uppercase;
+  }
+
+  /* 操作エリア */
+  #pad { position: fixed; inset: 0; }
+  /* 左: 移動ジョイスティック */
+  #joyZone {
+    position: absolute; left: 0; bottom: 0; width: 50%; height: calc(100% - 46px);
+  }
+  #joy {
+    position: absolute; width: 130px; height: 130px; border-radius: 50%;
+    background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.18);
+    transform: translate(-50%, -50%); display: none; pointer-events: none;
+  }
+  #joy.on { display: block; }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; border-radius: 50%;
+    background: rgba(255,255,255,.55); transform: translate(-50%, -50%);
+  }
+  #joyHint {
+    position: absolute; left: 25%; bottom: 90px; transform: translateX(-50%);
+    font-size: 13px; color: rgba(255,255,255,.35); pointer-events: none; white-space: nowrap;
+  }
+  /* 右: 視点ドラッグ */
+  #lookZone {
+    position: absolute; right: 0; bottom: 0; width: 50%; height: calc(100% - 46px);
+  }
+  #lookHint {
+    position: absolute; right: 25%; bottom: 90px; transform: translateX(50%);
+    font-size: 13px; color: rgba(255,255,255,.35); pointer-events: none; white-space: nowrap;
+  }
+
+  /* ボタン群 (右下) */
+  #btns {
+    position: fixed; right: 14px; bottom: 18px; z-index: 20;
+    display: grid; grid-template-columns: 76px 76px; gap: 12px;
+  }
+  .abtn {
+    width: 76px; height: 76px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,.13); color: #fff; font-size: 15px; font-weight: bold;
+    display: flex; align-items: center; justify-content: center; line-height: 1.1; text-align: center;
+  }
+  .abtn:active, .abtn.held { background: rgba(76,175,80,.6); }
+  #dashBtn.on { background: rgba(255,193,7,.7); }
+
+  /* ジャンプ (左下) */
+  #jumpBtn {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 18px; z-index: 20;
+    width: 88px; height: 64px; border-radius: 14px; border: none;
+    background: rgba(255,255,255,.13); color: #fff; font-size: 16px; font-weight: bold;
+  }
+  #jumpBtn:active { background: rgba(76,175,80,.6); }
+
+  /* ホットバー (上部、ステータス直下) */
+  #hotbar {
+    position: fixed; top: 50px; left: 50%; transform: translateX(-50%); z-index: 25;
+    display: flex; gap: 6px; padding: 6px 8px; max-width: 96vw; overflow-x: auto;
+    background: rgba(0,0,0,.35); border-radius: 10px;
+  }
+  .slot {
+    flex: none; width: 50px; height: 56px; border-radius: 8px; border: 2px solid rgba(255,255,255,.15);
+    background: rgba(255,255,255,.06); display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 2px; position: relative; color: #fff; padding: 0;
+  }
+  .slot.sel { border-color: #ffd54a; background: rgba(255,213,74,.18); }
+  .slot.empty { opacity: .4; }
+  .slot .nm { font-size: 11px; }
+  .slot .ct { font-size: 11px; color: #ffd54a; min-height: 13px; }
+  .slot .kx { position: absolute; top: 1px; left: 3px; font-size: 9px; color: rgba(255,255,255,.5); }
+</style>
+</head>
+<body>
+  <div id="status">
+    <span id="dot"></span>
+    <span id="statustext">接続中…</span>
+    <span id="hp"></span>
+  </div>
+
+  <div id="overlay">
+    <h1>📱 スマホコントローラー</h1>
+    <p>PC のゲーム画面に表示された<br>部屋コードを入力するか、QRから開いてください。</p>
+    <input id="roomInput" maxlength="8" placeholder="CODE" autocomplete="off" autocapitalize="characters">
+    <button id="connectBtn">接続する</button>
+    <p id="ovHint" style="font-size:12px;color:#7a828f"></p>
+  </div>
+
+  <div id="hotbar"></div>
+
+  <div id="pad">
+    <div id="joyZone">
+      <div id="joyHint">◀ 移動</div>
+      <div id="joy"><div id="knob"></div></div>
+    </div>
+    <div id="lookZone">
+      <div id="lookHint">視点 ▶</div>
+    </div>
+  </div>
+
+  <button id="jumpBtn">⤴ ジャンプ</button>
+
+  <div id="btns">
+    <button class="abtn" id="breakBtn">⛏<br>破壊</button>
+    <button class="abtn" id="placeBtn">▣<br>設置</button>
+    <button class="abtn" id="dashBtn">»<br>ダッシュ</button>
+    <button class="abtn" id="jumpBtn2">⤴<br>跳</button>
+  </div>
+
+<script>
+(() => {
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+  let room = (params.get('room') || '').toUpperCase();
+
+  const dot = $('dot'), statustext = $('statustext'), hpEl = $('hp');
+  const overlay = $('overlay'), roomInput = $('roomInput'), connectBtn = $('connectBtn'), ovHint = $('ovHint');
+
+  let ws = null;
+  let connected = false;
+
+  function setStatus(text, ok) {
+    statustext.textContent = text;
+    dot.classList.toggle('ok', !!ok);
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+  }
+
+  function connect() {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws`);
+    setStatus('接続中…', false);
+    ws.onopen = () => {
+      send({ t: 'join', room, role: 'controller' });
+      setStatus(`待機中 (部屋 ${room})`, false);
+    };
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.t === 'peer' && m.role === 'host') {
+        if (m.event === 'join') { connected = true; setStatus('ゲームに接続', true); }
+        if (m.event === 'leave') { connected = false; setStatus('PC側が切断', false); }
+      } else if (m.t === 'hud') {
+        connected = true; setStatus('ゲームに接続', true);
+        renderHud(m);
+      }
+    };
+    ws.onclose = () => { connected = false; setStatus('切断 — 再接続待ち', false); setTimeout(connect, 1500); };
+    ws.onerror = () => { setStatus('接続エラー', false); };
+  }
+
+  // ===== HUD (HP / ホットバー) =====
+  const hotbarEl = $('hotbar');
+  let slots = [];
+  function renderHud(m) {
+    if (typeof m.hp === 'number') {
+      const max = m.max || 20;
+      hpEl.innerHTML = `<span class="heart">♥</span> ${m.hp}/${max}`;
+    }
+    if (Array.isArray(m.blocks)) {
+      if (slots.length !== m.blocks.length) {
+        hotbarEl.innerHTML = '';
+        slots = m.blocks.map((b, i) => {
+          const s = document.createElement('button');
+          s.className = 'slot';
+          s.innerHTML = `<span class="kx">${i + 1}</span><span class="nm"></span><span class="ct"></span>`;
+          s.addEventListener('click', () => send({ t: 's', i }));
+          hotbarEl.appendChild(s);
+          return s;
+        });
+      }
+      m.blocks.forEach((b, i) => {
+        const s = slots[i];
+        s.querySelector('.nm').textContent = b.name;
+        s.querySelector('.ct').textContent = b.count > 0 ? b.count : '';
+        s.classList.toggle('sel', i === m.sel);
+        s.classList.toggle('empty', !b.count);
+      });
+    }
+  }
+
+  // ===== 移動ジョイスティック (左半分) =====
+  const joyZone = $('joyZone'), joy = $('joy'), knob = $('knob');
+  let joyId = null;
+  const joyCenter = { x: 0, y: 0 };
+  let curMove = { x: 0, y: 0 };
+
+  function joyStart(t) {
+    joyId = t.identifier;
+    joyCenter.x = t.clientX; joyCenter.y = t.clientY;
+    joy.style.left = t.clientX + 'px';
+    joy.style.top = (t.clientY - 46) + 'px'; // joyZone は status(46px) の下から
+    joy.classList.add('on');
+  }
+  function joyMove(t) {
+    const dx = t.clientX - joyCenter.x;
+    const dy = t.clientY - joyCenter.y;
+    const max = 55;
+    const dist = Math.min(Math.hypot(dx, dy), max);
+    const ang = Math.atan2(dy, dx);
+    const kx = Math.cos(ang) * dist, ky = Math.sin(ang) * dist;
+    knob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+    // x: 右が +, y: 前(上)が +  (画面上方向は dy<0)
+    curMove.x = (Math.cos(ang) * dist) / max;
+    curMove.y = -(Math.sin(ang) * dist) / max;
+  }
+  function joyEnd() {
+    joyId = null;
+    joy.classList.remove('on');
+    knob.style.transform = 'translate(-50%, -50%)';
+    curMove.x = 0; curMove.y = 0;
+  }
+
+  // ===== 視点ドラッグ (右半分) =====
+  const lookZone = $('lookZone');
+  let lookId = null;
+  const lookLast = { x: 0, y: 0 };
+  let lookAccum = { dx: 0, dy: 0 };
+
+  function inLeft(t)  { return t.clientX < window.innerWidth / 2; }
+
+  document.addEventListener('touchstart', (e) => {
+    for (const t of e.changedTouches) {
+      const onBtn = t.target.closest && t.target.closest('button, #hotbar, #overlay');
+      if (onBtn) continue;
+      if (inLeft(t)) { if (joyId === null) joyStart(t); }
+      else { if (lookId === null) { lookId = t.identifier; lookLast.x = t.clientX; lookLast.y = t.clientY; } }
+    }
+    if (!overlay.classList.contains('hidden')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) joyMove(t);
+      else if (t.identifier === lookId) {
+        lookAccum.dx += t.clientX - lookLast.x;
+        lookAccum.dy += t.clientY - lookLast.y;
+        lookLast.x = t.clientX; lookLast.y = t.clientY;
+      }
+    }
+    if (!overlay.classList.contains('hidden')) return;
+    e.preventDefault();
+  }, { passive: false });
+
+  function endTouch(e) {
+    for (const t of e.changedTouches) {
+      if (t.identifier === joyId) joyEnd();
+      else if (t.identifier === lookId) lookId = null;
+    }
+  }
+  document.addEventListener('touchend', endTouch);
+  document.addEventListener('touchcancel', endTouch);
+
+  // ===== 入力の定期送信 (16fps ぶんを束ねて間引き) =====
+  let lastMoveSent = { x: 999, y: 999 };
+  setInterval(() => {
+    // 移動: 値が変わった時だけ送る
+    if (Math.abs(curMove.x - lastMoveSent.x) > 0.08 || Math.abs(curMove.y - lastMoveSent.y) > 0.08 ||
+        ((curMove.x === 0 && curMove.y === 0) && (lastMoveSent.x !== 0 || lastMoveSent.y !== 0))) {
+      send({ t: 'm', x: +curMove.x.toFixed(2), y: +curMove.y.toFixed(2) });
+      lastMoveSent = { x: curMove.x, y: curMove.y };
+    }
+    // 視点: 溜まった分を送ってリセット
+    if (lookAccum.dx !== 0 || lookAccum.dy !== 0) {
+      send({ t: 'l', dx: Math.round(lookAccum.dx), dy: Math.round(lookAccum.dy) });
+      lookAccum.dx = 0; lookAccum.dy = 0;
+    }
+  }, 60);
+
+  // ===== ボタン =====
+  function bindHold(el, onDown, onUp) {
+    const down = (e) => { e.preventDefault(); el.classList.add('held'); onDown && onDown(); };
+    const up   = (e) => { e.preventDefault(); el.classList.remove('held'); onUp && onUp(); };
+    el.addEventListener('touchstart', down, { passive: false });
+    el.addEventListener('touchend', up, { passive: false });
+    el.addEventListener('touchcancel', up, { passive: false });
+    el.addEventListener('mousedown', down);
+    el.addEventListener('mouseup', up);
+  }
+  function bindTap(el, fn) {
+    el.addEventListener('touchstart', (e) => { e.preventDefault(); fn(); }, { passive: false });
+    el.addEventListener('click', (e) => { e.preventDefault(); fn(); });
+  }
+
+  bindTap($('jumpBtn'), () => send({ t: 'j' }));
+  bindTap($('jumpBtn2'), () => send({ t: 'j' }));
+  bindTap($('placeBtn'), () => send({ t: 'p' }));
+  bindHold($('breakBtn'), () => send({ t: 'b', on: true }), () => send({ t: 'b', on: false }));
+
+  const dashBtn = $('dashBtn');
+  let dashOn = false;
+  bindTap(dashBtn, () => { dashOn = !dashOn; dashBtn.classList.toggle('on', dashOn); send({ t: 'd', on: dashOn }); });
+
+  // ===== 起動 =====
+  if (room) {
+    overlay.classList.add('hidden');
+    connect();
+  } else {
+    ovHint.textContent = 'QR から開くと自動で部屋コードが入ります。';
+  }
+  connectBtn.addEventListener('click', () => {
+    const v = roomInput.value.trim().toUpperCase();
+    if (!v) { roomInput.focus(); return; }
+    room = v;
+    overlay.classList.add('hidden');
+    connect();
+  });
+})();
+</script>
+</body>
+</html>
