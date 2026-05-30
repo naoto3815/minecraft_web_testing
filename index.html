@@ -310,7 +310,7 @@
     // ===== シーン・カメラ・レンダラ =====
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x87CEEB, 30, 80);
+    scene.fog = new THREE.Fog(0x87CEEB, 28, 64);  // far はストリーミング半径(LOAD_RADIUS)以内に
 
     const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
     camera.position.set(96, 15, 96);  // 192×192 ワールドの中央
@@ -455,59 +455,164 @@
       return b > 0.4 ? 3 : 1;  // 3=砂, 1=土
     }
 
-    // 地形生成: 表面3層 = 土/砂、深層 = 石
-    for (let z = 0; z < GROUND; z++) {
-      for (let x = 0; x < GROUND; x++) {
-        const h = terrainHeight(x, z);
-        const surface = getSurfaceType(x, z);
-        addBlock(x, h,     z, surface);  // 表面
-        addBlock(x, h - 1, z, surface);
-        addBlock(x, h - 2, z, surface);
-        addBlock(x, h - 3, z, 2);        // 深層 (石)
-        addBlock(x, h - 4, z, 2);
-      }
+    // ===== 無限地形: 半径ストリーミング =====
+    // プレイヤーの周囲だけを生成し、遠くは破棄する。地形は terrainHeight() から
+    // いつでも再生成できるので、改変分(edits)だけ覚えておけば建築・採掘は保たれる。
+    const SPAWN_CX = 96, SPAWN_CZ = 96;
+    const TREE_CHANCE = 0.02;        // 列ごとに木が生える確率
+    const LOAD_RADIUS = 66;          // この半径(マス)内を生成 (fog far より少し広く)
+    const UNLOAD_RADIUS = 74;        // この半径外を破棄 (ヒステリシスで境界のバタつき防止)
+    const COLUMNS_PER_FRAME = 24;    // 1フレームで生成する列数 (移動中のカクつき防止)
+    const UNLOADS_PER_FRAME = 48;    // 1フレームで破棄する列数
+
+    const colKey = (cx, cz) => cx + ',' + cz;
+    const loadedColumns = new Map(); // "cx,cz" → [その列が生成したブロックキー...]
+    const edits = new Map();         // "cx,cz" → Map("x,y,z" → typeIndex | -1(=破壊))
+    const loadQueue = [];            // 生成待ち {cx,cz,d2}
+    const unloadQueue = [];          // 破棄待ち "cx,cz"
+
+    // 座標から決定論的な擬似乱数 [0,1) — 同じ座標なら毎回同じ値 (再生成しても地形が変わらない)
+    function hashRand(x, z, salt) {
+      let h = Math.imul(x | 0, 374761393) + Math.imul(z | 0, 668265263) + Math.imul(salt | 0, 2147483647);
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967296;
     }
 
-    // ===== 木を植える =====
-    function plantTree(x, surfaceY, z) {
-      const trunkHeight = 4 + Math.floor(Math.random() * 3);  // 4〜6マス
+    // ===== 木を植える (決定論的・置いたキーを keys に記録) =====
+    function plantTree(x, surfaceY, z, keys) {
+      const trunkHeight = 4 + Math.floor(hashRand(x, z, 1) * 3);  // 4〜6マス
       const top = surfaceY + trunkHeight;
       // 幹 (木材)
       for (let i = 1; i <= trunkHeight; i++) {
-        addBlock(x, surfaceY + i, z, 4);
+        if (addBlock(x, surfaceY + i, z, 4)) keys.push(key(x, surfaceY + i, z));
       }
       // 葉: 上部周辺の 5x5 (角は確率で欠けさせて自然な形に)
       for (let dy = -1; dy <= 0; dy++) {
         for (let dx = -2; dx <= 2; dx++) {
           for (let dz = -2; dz <= 2; dz++) {
             if (dx === 0 && dz === 0) continue;  // 幹の列はスキップ
-            if (Math.abs(dx) === 2 && Math.abs(dz) === 2 && Math.random() < 0.5) continue;
-            addBlock(x + dx, top + dy, z + dz, 5);
+            if (Math.abs(dx) === 2 && Math.abs(dz) === 2 && hashRand(x + dx, z + dz, 2) < 0.5) continue;
+            if (addBlock(x + dx, top + dy, z + dz, 5)) keys.push(key(x + dx, top + dy, z + dz));
           }
         }
       }
       // 葉: 3x3 上層
       for (let dx = -1; dx <= 1; dx++) {
         for (let dz = -1; dz <= 1; dz++) {
-          addBlock(x + dx, top + 1, z + dz, 5);
+          if (addBlock(x + dx, top + 1, z + dz, 5)) keys.push(key(x + dx, top + 1, z + dz));
         }
       }
       // 最頂部の葉
-      addBlock(x, top + 2, z, 5);
+      if (addBlock(x, top + 2, z, 5)) keys.push(key(x, top + 2, z));
     }
 
-    const TREE_CHANCE = 0.006;  // 192×192の広い世界で約220本程度
-    const SPAWN_CX = 96, SPAWN_CZ = 96;
-    for (let z = 3; z < GROUND - 3; z++) {
-      for (let x = 3; x < GROUND - 3; x++) {
-        // プレイヤー初期位置 (96, 96) 付近は避ける
-        if (Math.abs(x - SPAWN_CX) < 4 && Math.abs(z - SPAWN_CZ) < 4) continue;
-        if (getSurfaceType(x, z) !== 1) continue;  // 土のみ
-        if (Math.random() < TREE_CHANCE) {
-          plantTree(x, terrainHeight(x, z), z);
+    // 1列(x,z)分の地形を生成 (生成済みならスキップ)
+    function generateColumn(cx, cz) {
+      const ck = colKey(cx, cz);
+      if (loadedColumns.has(ck)) return;
+      const keys = [];
+      const h = terrainHeight(cx, cz);
+      const surface = getSurfaceType(cx, cz);
+      if (addBlock(cx, h,     cz, surface)) keys.push(key(cx, h, cz));     // 表面
+      if (addBlock(cx, h - 1, cz, surface)) keys.push(key(cx, h - 1, cz));
+      if (addBlock(cx, h - 2, cz, surface)) keys.push(key(cx, h - 2, cz));
+      if (addBlock(cx, h - 3, cz, 2))       keys.push(key(cx, h - 3, cz)); // 深層 (石)
+      if (addBlock(cx, h - 4, cz, 2))       keys.push(key(cx, h - 4, cz));
+      // 木 (土の上のみ・スポーン付近は避ける・決定論的に判定)
+      if (surface === 1 &&
+          !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4) &&
+          hashRand(cx, cz, 0) < TREE_CHANCE) {
+        plantTree(cx, h, cz, keys);
+      }
+      // プレイヤーの改変を反映 (掘った穴・置いたブロックを再現)
+      const e = edits.get(ck);
+      if (e) {
+        for (const [bk, val] of e) {
+          const [bx, by, bz] = bk.split(',').map(Number);
+          removeBlock(bx, by, bz);
+          if (val >= 0 && addBlock(bx, by, bz, val)) keys.push(bk);
         }
       }
+      loadedColumns.set(ck, keys);
     }
+
+    // 1列を破棄 (その列が生成したブロックをすべて消す)
+    function unloadColumn(ck) {
+      const keys = loadedColumns.get(ck);
+      if (!keys) return;
+      for (const k of keys) {
+        const [bx, by, bz] = k.split(',').map(Number);
+        removeBlock(bx, by, bz);
+      }
+      loadedColumns.delete(ck);
+    }
+
+    // プレイヤーの改変(設置/破壊)を記録 — 再生成しても保たれる (val: typeIndex か -1=破壊)
+    function recordEdit(x, y, z, val) {
+      const ck = colKey(x, z);
+      let e = edits.get(ck);
+      if (!e) { e = new Map(); edits.set(ck, e); }
+      e.set(key(x, y, z), val);
+      // ロード中の列に置いたブロックは、破棄時に一緒に消えるようキー一覧へ登録
+      if (val >= 0 && loadedColumns.has(ck)) loadedColumns.get(ck).push(key(x, y, z));
+    }
+
+    // ストリーミング更新: 周囲を生成・遠方を破棄 (1フレームの予算ぶんずつ)
+    let lastStreamCol = null;
+    function updateStreaming() {
+      const pcx = Math.round(camera.position.x);
+      const pcz = Math.round(camera.position.z);
+      // プレイヤーが別の列に移ったら、生成/破棄キューを組み直す
+      if (lastStreamCol === null || pcx !== lastStreamCol.x || pcz !== lastStreamCol.z) {
+        lastStreamCol = { x: pcx, z: pcz };
+        loadQueue.length = 0;
+        unloadQueue.length = 0;  // 古い破棄予定を捨てて現在位置から組み直す
+        const R = LOAD_RADIUS, R2 = R * R;
+        for (let dz = -R; dz <= R; dz++) {
+          for (let dx = -R; dx <= R; dx++) {
+            const d2 = dx * dx + dz * dz;
+            if (d2 > R2) continue;
+            const cx = pcx + dx, cz = pcz + dz;
+            if (loadedColumns.has(colKey(cx, cz))) continue;  // 生成済みは飛ばす
+            loadQueue.push({ cx, cz, d2 });
+          }
+        }
+        loadQueue.sort((a, b) => a.d2 - b.d2);  // 近い列から
+        const U2 = UNLOAD_RADIUS * UNLOAD_RADIUS;
+        for (const ck of loadedColumns.keys()) {
+          const ci = ck.indexOf(',');
+          const cx = +ck.slice(0, ci), cz = +ck.slice(ci + 1);
+          const ddx = cx - pcx, ddz = cz - pcz;
+          if (ddx * ddx + ddz * ddz > U2) unloadQueue.push(ck);
+        }
+      }
+      // 予算ぶんだけ生成
+      let n = COLUMNS_PER_FRAME;
+      while (n-- > 0 && loadQueue.length) {
+        const c = loadQueue.shift();
+        generateColumn(c.cx, c.cz);
+      }
+      // 予算ぶんだけ破棄
+      let m = UNLOADS_PER_FRAME;
+      while (m-- > 0 && unloadQueue.length) {
+        unloadColumn(unloadQueue.shift());
+      }
+    }
+
+    // 起動時: スポーン周囲をまとめて生成 (以降は移動に応じてストリーミング)
+    (function initialLoad() {
+      const R = LOAD_RADIUS, R2 = R * R;
+      const list = [];
+      for (let dz = -R; dz <= R; dz++) {
+        for (let dx = -R; dx <= R; dx++) {
+          const d2 = dx * dx + dz * dz;
+          if (d2 <= R2) list.push({ cx: SPAWN_CX + dx, cz: SPAWN_CZ + dz, d2 });
+        }
+      }
+      list.sort((a, b) => a.d2 - b.d2);
+      for (const c of list) generateColumn(c.cx, c.cz);
+    })();
 
     // 初期スポーン位置を実際の地面に合わせる (初期落下を防ぐ)
     camera.position.y = terrainHeight(SPAWN_CX, SPAWN_CZ) + 2;
@@ -798,12 +903,11 @@
       } else if (e.button === 2) {
         if (inventory[selectedBlock] <= 0) return;
         const n = hit.face.normal;
-        if (addBlock(
-          Math.round(info.x + n.x),
-          Math.round(info.y + n.y),
-          Math.round(info.z + n.z),
-          selectedBlock
-        )) {
+        const px = Math.round(info.x + n.x);
+        const py = Math.round(info.y + n.y);
+        const pz = Math.round(info.z + n.z);
+        if (addBlock(px, py, pz, selectedBlock)) {
+          recordEdit(px, py, pz, selectedBlock);  // 改変として記録 (戻っても残る)
           inventory[selectedBlock]--;
           updateHotbar();
           startHandSwing();
@@ -1107,7 +1211,9 @@
             const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
             if (d > EXPLOSION_RADIUS) continue;
             if (Math.random() < 1 - d / EXPLOSION_RADIUS) {
-              removeBlock(Math.round(cx + dx), Math.round(cy + dy), Math.round(cz + dz));
+              const bx = Math.round(cx + dx), by = Math.round(cy + dy), bz = Math.round(cz + dz);
+              removeBlock(bx, by, bz);
+              recordEdit(bx, by, bz, -1);  // クレーターを記録 (戻っても残る)
             }
           }
         }
@@ -1484,12 +1590,11 @@
         const info = blockFromHit(hits[0]);
         if (!info) return;
         const n = hits[0].face.normal;
-        if (addBlock(
-          Math.round(info.x + n.x),
-          Math.round(info.y + n.y),
-          Math.round(info.z + n.z),
-          selectedBlock
-        )) {
+        const px = Math.round(info.x + n.x);
+        const py = Math.round(info.y + n.y);
+        const pz = Math.round(info.z + n.z);
+        if (addBlock(px, py, pz, selectedBlock)) {
+          recordEdit(px, py, pz, selectedBlock);  // 改変として記録 (戻っても残る)
           inventory[selectedBlock]--;
           updateHotbar();
           startHandSwing();
@@ -1587,6 +1692,9 @@
           else if (camera.position.y > fallStartY) fallStartY = camera.position.y;
         }
 
+        // 無限地形ストリーミング: 周囲を生成・遠方を破棄
+        updateStreaming();
+
         // 敵Mob (クリーパー) の更新
         updateCreepers(dt);
 
@@ -1623,6 +1731,7 @@
               inventory[info.typeIndex]++;
               updateHotbar();
               removeBlock(info.x, info.y, info.z);
+              recordEdit(info.x, info.y, info.z, -1);  // 破壊を記録 (戻っても穴は残る)
               breakTargetKey = null;
               breakTargetType = null;
               breakProgress = 0;
