@@ -234,13 +234,22 @@
       { name: '雪',     color: 0xF0F8FF, tex: 'textures/snow.png',     hardness: 0.2 },
       { name: 'レンガ', color: 0xA0463E, tex: 'textures/brick.png',    hardness: 1.8 },
       { name: '黒曜石', color: 0x1A0F2E, tex: 'textures/obsidian.png', hardness: 5.0 },
+      // 流体ブロック: 水は半透明(50%)、溶岩は自己発光 (触れるとダメージ)
+      { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.5 } },
+      { name: '溶岩',   color: 0xE2552B, tex: 'textures/lava.png', hardness: 0.1, matOpts: { emissive: 0xFF6A00, emissiveIntensity: 0.7, emissiveMap: true } },
     ];
     let selectedBlock = 0;
+    const WATER_INDEX = blockTypes.findIndex((b) => b.name === '水');
+    const LAVA_INDEX  = blockTypes.findIndex((b) => b.name === '溶岩');
 
     // マテリアル生成: 単一テクスチャ or 6面別テクスチャ
     const textureLoader = new THREE.TextureLoader();
-    function makeMaterial(texPath, fallbackColor) {
-      const mat = new THREE.MeshLambertMaterial({ color: fallbackColor });
+    function makeMaterial(texPath, fallbackColor, opts = {}) {
+      const params = { color: fallbackColor };
+      if (opts.transparent) { params.transparent = true; params.opacity = opts.opacity ?? 1; }
+      if (opts.emissive !== undefined) params.emissive = opts.emissive;
+      const mat = new THREE.MeshLambertMaterial(params);
+      if (opts.emissiveIntensity !== undefined) mat.emissiveIntensity = opts.emissiveIntensity;
       if (!texPath) return mat;
       textureLoader.load(
         texPath,
@@ -249,6 +258,8 @@
           tex.minFilter = THREE.NearestFilter;
           mat.map = tex;
           mat.color.set(0xffffff);
+          // 自己発光ブロック(溶岩)はテクスチャ自身を発光マップにして自然に光らせる
+          if (opts.emissiveMap) { mat.emissiveMap = tex; mat.emissive.set(0xffffff); }
           mat.needsUpdate = true;
         },
         undefined,
@@ -259,9 +270,9 @@
     blockTypes.forEach((bt) => {
       if (Array.isArray(bt.tex)) {
         // 6面分の Material 配列 (Three.js が自動で各面に適用)
-        bt.material = bt.tex.map((t) => makeMaterial(t, bt.color));
+        bt.material = bt.tex.map((t) => makeMaterial(t, bt.color, bt.matOpts));
       } else {
-        bt.material = makeMaterial(bt.tex, bt.color);
+        bt.material = makeMaterial(bt.tex, bt.color, bt.matOpts);
       }
     });
 
@@ -470,6 +481,12 @@
     const COLUMNS_PER_FRAME = 24;    // 1フレームで生成する列数 (移動中のカクつき防止)
     const UNLOADS_PER_FRAME = 48;    // 1フレームで破棄する列数
 
+    // ===== 流体 (水/溶岩) のワールド生成 =====
+    const WATER_LEVEL = 7;           // この高さまで谷を流体で満たす (低地の約6%が湖になる)
+    const LAVA_CELL = 8;             // 溶岩湖を決める粗グリッドのセルサイズ
+    const LAVA_CHANCE = 0.12;        // セルが溶岩湖になる確率 (それ以外の湖は水)
+    const LAVA_SALT = 777;           // 溶岩判定用のハッシュソルト
+
     const colKey = (cx, cz) => cx + ',' + cz;
     const loadedColumns = new Map(); // "cx,cz" → [その列が生成したブロックキー...]
     const edits = new Map();         // "cx,cz" → Map("x,y,z" → typeIndex | -1(=破壊))
@@ -524,8 +541,18 @@
       if (addBlock(cx, h - 2, cz, surface)) keys.push(key(cx, h - 2, cz));
       if (addBlock(cx, h - 3, cz, 2))       keys.push(key(cx, h - 3, cz)); // 深層 (石)
       if (addBlock(cx, h - 4, cz, 2))       keys.push(key(cx, h - 4, cz));
-      // 木 (土の上のみ・スポーン付近は避ける・決定論的に判定)
-      if (surface === 1 &&
+      // 流体: 低地(谷)を WATER_LEVEL まで満たす。粗グリッド単位で溶岩湖/水を決める
+      if (h < WATER_LEVEL) {
+        const cellX = Math.floor(cx / LAVA_CELL), cellZ = Math.floor(cz / LAVA_CELL);
+        const nearSpawn = Math.abs(cx - SPAWN_CX) < 8 && Math.abs(cz - SPAWN_CZ) < 8;
+        const fluid = (!nearSpawn && hashRand(cellX, cellZ, LAVA_SALT) < LAVA_CHANCE)
+          ? LAVA_INDEX : WATER_INDEX;
+        for (let y = h + 1; y <= WATER_LEVEL; y++) {
+          if (addBlock(cx, y, cz, fluid)) keys.push(key(cx, y, cz));
+        }
+      }
+      // 木 (土の上のみ・水没地と スポーン付近は避ける・決定論的に判定)
+      if (surface === 1 && h >= WATER_LEVEL &&
           !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4) &&
           hashRand(cx, cz, 0) < TREE_CHANCE) {
         plantTree(cx, h, cz, keys);
@@ -852,6 +879,19 @@
       return -Infinity;
     }
 
+    // プレイヤーの体 (足元のすぐ下〜頭) が溶岩ブロックに触れているか?
+    function isTouchingLava() {
+      const px = Math.round(camera.position.x);
+      const pz = Math.round(camera.position.z);
+      const lo = Math.floor(camera.position.y - 1.5 - 0.5);  // 足元の下のブロック
+      const hi = Math.ceil(camera.position.y);               // 頭まで
+      for (let y = lo; y <= hi; y++) {
+        const e = blocks.get(key(px, y, pz));
+        if (e && e.typeIndex === LAVA_INDEX) return true;
+      }
+      return false;
+    }
+
     // (x,z) で camera Y に立った時、体 (足元〜頭) がブロックに干渉するか?
     function hasCeiling(x, z, cameraY) {
       const px = Math.round(x);
@@ -917,6 +957,14 @@
       if (e.code === 'KeyA') move.l = false;
       if (e.code === 'KeyD') move.r = false;
     });
+    // マウスホイールでホットバーを巡回 (数字キー 1-9 で届かない水/溶岩も選べる)
+    addEventListener('wheel', (e) => {
+      if (!controls.isLocked) return;
+      const dir = e.deltaY > 0 ? 1 : -1;
+      selectedBlock = (selectedBlock + dir + blockTypes.length) % blockTypes.length;
+      updateBlockInfo();
+      updateHotbar();
+    }, { passive: true });
 
     function updateBlockInfo() {
       const bt = blockTypes[selectedBlock];
@@ -1530,6 +1578,9 @@
     const HP_REGEN_INTERVAL = 2.0;   // 回復間隔 (秒)
     let timeSinceDamage = HP_REGEN_DELAY;  // 初期は即回復可
     let regenTimer = 0;
+    const LAVA_DAMAGE = 2;               // 溶岩 1ティックあたりのダメージ
+    const LAVA_DAMAGE_INTERVAL = 0.5;    // 溶岩ダメージの間隔 (秒) → 約5秒で死亡
+    let lavaDamageTimer = LAVA_DAMAGE_INTERVAL;  // 触れた瞬間に即ダメージ
     let shakeIntensity = 0;          // 被弾シェイクの強度 (0-1)
     const SHAKE_DECAY = 5;           // シェイクの減衰速度 (per second)
     const hpFillEl = document.getElementById('hpfill');
@@ -1780,6 +1831,17 @@
         // 奈落落下: y < VOID_Y で即死
         if (camera.position.y < VOID_Y && playerHP > 0) {
           damagePlayer(PLAYER_MAX_HP, true);
+        }
+
+        // 溶岩ダメージ: 溶岩に触れている間、一定間隔で継続ダメージ
+        if (playerHP > 0 && isTouchingLava()) {
+          lavaDamageTimer += dt;
+          if (lavaDamageTimer >= LAVA_DAMAGE_INTERVAL) {
+            lavaDamageTimer = 0;
+            damagePlayer(LAVA_DAMAGE, true);
+          }
+        } else {
+          lavaDamageTimer = LAVA_DAMAGE_INTERVAL;  // 離れたらリセット (次の接触で即ダメージ)
         }
 
         // 落下ダメージ: 着地時に落差からダメージ計算
