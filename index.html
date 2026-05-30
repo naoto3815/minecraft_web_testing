@@ -247,7 +247,7 @@
       { name: 'レンガ', color: 0xA0463E, tex: 'textures/brick.png',    hardness: 1.8 },
       { name: '黒曜石', color: 0x1A0F2E, tex: 'textures/obsidian.png', hardness: 5.0 },
       // 流体ブロック: 水は半透明(50%)、溶岩は自己発光 (触れるとダメージ)
-      { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.5 } },
+      { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.5, depthWrite: false, unlit: true } },
       { name: '溶岩',   color: 0xE2552B, tex: 'textures/lava.png', hardness: 0.1, matOpts: { emissive: 0xFF6A00, emissiveIntensity: 0.7, emissiveMap: true } },
     ];
     let selectedBlock = 0;
@@ -259,9 +259,13 @@
     function makeMaterial(texPath, fallbackColor, opts = {}) {
       const params = { color: fallbackColor };
       if (opts.transparent) { params.transparent = true; params.opacity = opts.opacity ?? 1; }
+      // 半透明ブロック(水)は depthWrite を切ると、隣接キューブ面の Z ファイトによる
+      // 境界線が消えて滑らかに見える
+      if (opts.depthWrite !== undefined) params.depthWrite = opts.depthWrite;
       if (opts.emissive !== undefined) params.emissive = opts.emissive;
-      const mat = new THREE.MeshLambertMaterial(params);
-      if (opts.emissiveIntensity !== undefined) mat.emissiveIntensity = opts.emissiveIntensity;
+      // unlit: 面の向きで陰影が変わらず一様な色になる (水を均一に見せる)
+      const mat = opts.unlit ? new THREE.MeshBasicMaterial(params) : new THREE.MeshLambertMaterial(params);
+      if (opts.emissiveIntensity !== undefined && !opts.unlit) mat.emissiveIntensity = opts.emissiveIntensity;
       if (!texPath) return mat;
       textureLoader.load(
         texPath,
