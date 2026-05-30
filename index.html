@@ -46,6 +46,17 @@
       color: white; font-size: 13px; font-weight: bold;
       text-shadow: 0 0 3px black;
     }
+    #breathbar {
+      position: absolute; top: 42px; right: 12px;
+      width: 200px; height: 14px;
+      background: rgba(0,0,0,0.5); border-radius: 7px;
+      overflow: hidden; pointer-events: none; display: none;
+    }
+    #breathfill {
+      position: absolute; inset: 0;
+      background: linear-gradient(to right, #1e88e5, #80d8ff);
+      width: 100%; transition: width 0.15s linear;
+    }
     #breakbar {
       position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
       width: 180px; height: 6px;
@@ -175,6 +186,7 @@
   <div id="startmsg">クリックして開始<small>Escで一時停止</small></div>
 
   <div id="hpbar"><div id="hpfill"></div><span id="hptext">HP 20 / 20</span></div>
+  <div id="breathbar"><div id="breathfill"></div></div>
   <div id="breakbar"><div id="breakfill"></div></div>
   <div id="hotbar"></div>
   <div id="damage-flash"></div>
@@ -865,13 +877,19 @@
     // (x,z) で「現在の足元から STEP_HEIGHT 以内で届く最も高いブロック上面 + 身長 (1.5)」
     // refY を渡すとそのカメラ高さを基準にする (省略時は現在のカメラ位置)
     // 頭より上のブロック (天井) は床扱いしないので、トンネルも通れる
+    // そのマスに当たり判定のあるブロックがあるか? (水は本家同様すり抜けるので床/壁にしない)
+    function isSolidAt(px, py, pz) {
+      const e = blocks.get(key(px, py, pz));
+      return e !== undefined && e.typeIndex !== WATER_INDEX;
+    }
+
     function getFloorY(x, z, refY) {
       if (refY === undefined) refY = camera.position.y;
       const px = Math.round(x);
       const pz = Math.round(z);
       const maxReach = refY - 1.5 + STEP_HEIGHT + 0.05;  // 足元 + ステップ高
       for (let y = 20; y >= -10; y--) {
-        if (blocks.has(key(px, y, pz))) {
+        if (isSolidAt(px, y, pz)) {
           const blockTop = y + 0.5;
           if (blockTop <= maxReach) return blockTop + 1.5;
         }
@@ -892,13 +910,32 @@
       return false;
     }
 
+    // 頭(視点)が水中にあるか? → 呼吸できない判定に使う
+    function isHeadInWater() {
+      const e = blocks.get(key(Math.round(camera.position.x), Math.round(camera.position.y), Math.round(camera.position.z)));
+      return e !== undefined && e.typeIndex === WATER_INDEX;
+    }
+
+    // 体(足元〜頭)のどこかが水に浸かっているか? → 落下ダメージ無効化に使う
+    function isBodyInWater() {
+      const px = Math.round(camera.position.x);
+      const pz = Math.round(camera.position.z);
+      const lo = Math.floor(camera.position.y - 1.5 + 0.1);
+      const hi = Math.round(camera.position.y);
+      for (let y = lo; y <= hi; y++) {
+        const e = blocks.get(key(px, y, pz));
+        if (e && e.typeIndex === WATER_INDEX) return true;
+      }
+      return false;
+    }
+
     // (x,z) で camera Y に立った時、体 (足元〜頭) がブロックに干渉するか?
     function hasCeiling(x, z, cameraY) {
       const px = Math.round(x);
       const pz = Math.round(z);
       const feetY = cameraY - 1.5;
       for (let y = Math.floor(feetY); y <= Math.ceil(cameraY); y++) {
-        if (!blocks.has(key(px, y, pz))) continue;
+        if (!isSolidAt(px, y, pz)) continue;
         const bb = y - 0.5;
         const bt = y + 0.5;
         // ブロック [bb, bt] と体 [feetY+0.05, cameraY-0.05] が重なる?
@@ -1069,7 +1106,7 @@
       const px = Math.round(x);
       const pz = Math.round(z);
       for (let y = 20; y >= -10; y--) {
-        if (blocks.has(key(px, y, pz))) return y + 0.5;
+        if (isSolidAt(px, y, pz)) return y + 0.5;
       }
       return null;
     }
@@ -1581,10 +1618,18 @@
     const LAVA_DAMAGE = 2;               // 溶岩 1ティックあたりのダメージ
     const LAVA_DAMAGE_INTERVAL = 0.5;    // 溶岩ダメージの間隔 (秒) → 約5秒で死亡
     let lavaDamageTimer = LAVA_DAMAGE_INTERVAL;  // 触れた瞬間に即ダメージ
+    // 溺れ (水中で呼吸できない)
+    const BREATH_CAPACITY = 10;          // 水中で息が続く秒数
+    const DROWN_DAMAGE = 2;              // 溺れ 1ティックあたりのダメージ
+    const DROWN_INTERVAL = 1.0;          // 溺れダメージの間隔 (秒)
+    let breathHeld = 0;                  // 頭が水中にある累積秒数
+    let drownTimer = 0;
     let shakeIntensity = 0;          // 被弾シェイクの強度 (0-1)
     const SHAKE_DECAY = 5;           // シェイクの減衰速度 (per second)
     const hpFillEl = document.getElementById('hpfill');
     const hpTextEl = document.getElementById('hptext');
+    const breathBarEl = document.getElementById('breathbar');
+    const breathFillEl = document.getElementById('breathfill');
     const damageFlashEl = document.getElementById('damage-flash');
     const gameoverEl = document.getElementById('gameover');
 
@@ -1593,6 +1638,14 @@
       hpTextEl.textContent = `HP ${playerHP} / ${PLAYER_MAX_HP}`;
     }
     updateHPDisplay();
+
+    // 息ゲージ表示: 水中にいる間だけ表示し、残り息を割合で示す
+    function updateBreathDisplay(headInWater) {
+      if (!headInWater) { breathBarEl.style.display = 'none'; return; }
+      breathBarEl.style.display = 'block';
+      const remain = Math.max(0, 1 - breathHeld / BREATH_CAPACITY);
+      breathFillEl.style.width = `${remain * 100}%`;
+    }
 
     function damagePlayer(amount, ignoreInvuln = false) {
       if (playerHP <= 0) return;
@@ -1844,11 +1897,28 @@
           lavaDamageTimer = LAVA_DAMAGE_INTERVAL;  // 離れたらリセット (次の接触で即ダメージ)
         }
 
-        // 落下ダメージ: 着地時に落差からダメージ計算
+        // 溺れ: 頭が水中にある間 息を消費し、尽きたら一定間隔でダメージ
+        const headInWater = isHeadInWater();
+        if (playerHP > 0 && headInWater) {
+          breathHeld += dt;
+          if (breathHeld >= BREATH_CAPACITY) {
+            drownTimer += dt;
+            if (drownTimer >= DROWN_INTERVAL) {
+              drownTimer = 0;
+              damagePlayer(DROWN_DAMAGE, true);
+            }
+          }
+        } else {
+          breathHeld = 0;  // 水面に出たら息は即回復
+          drownTimer = 0;
+        }
+        updateBreathDisplay(headInWater);
+
+        // 落下ダメージ: 着地時に落差からダメージ計算 (水に入ると無効=本家同様)
         if (onGround) {
           if (fallStartY !== null) {
             const fallDist = fallStartY - camera.position.y;
-            if (fallDist > FALL_SAFE_HEIGHT) {
+            if (fallDist > FALL_SAFE_HEIGHT && !isBodyInWater()) {
               const dmg = Math.floor((fallDist - (FALL_SAFE_HEIGHT - 1)) * 2);
               damagePlayer(dmg, true);
             }
