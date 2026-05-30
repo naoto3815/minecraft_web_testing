@@ -556,6 +556,38 @@
       e.set(key(x, y, z), val);
       // ロード中の列に置いたブロックは、破棄時に一緒に消えるようキー一覧へ登録
       if (val >= 0 && loadedColumns.has(ck)) loadedColumns.get(ck).push(key(x, y, z));
+      scheduleSave();  // localStorage への保存を予約
+    }
+
+    // ===== セーブ/ロード (改変分だけ localStorage に保存) =====
+    const SAVE_KEY = 'mc_world_edits_v1';
+    let saveTimer = null;
+    function scheduleSave() {
+      // 連続採掘中に毎回書き込まないよう 1 秒デバウンス
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveEdits, 1000);
+    }
+    function saveEdits() {
+      saveTimer = null;
+      try {
+        const obj = {};
+        for (const [, e] of edits) for (const [bk, val] of e) obj[bk] = val;
+        localStorage.setItem(SAVE_KEY, JSON.stringify(obj));
+      } catch (err) { /* 容量超過などは無視 */ }
+    }
+    function loadEdits() {
+      try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (!raw) return;
+        const obj = JSON.parse(raw);
+        for (const bk in obj) {
+          const c = bk.split(',');
+          const ck = colKey(+c[0], +c[2]);
+          let e = edits.get(ck);
+          if (!e) { e = new Map(); edits.set(ck, e); }
+          e.set(bk, obj[bk]);
+        }
+      } catch (err) { /* 壊れたデータは無視 */ }
     }
 
     // ストリーミング更新: 周囲を生成・遠方を破棄 (1フレームの予算ぶんずつ)
@@ -599,6 +631,9 @@
         unloadColumn(unloadQueue.shift());
       }
     }
+
+    // 保存済みの改変を復元 (initialLoad より前に呼ぶ → スポーン周辺に即反映)
+    loadEdits();
 
     // 起動時: スポーン周囲をまとめて生成 (以降は移動に応じてストリーミング)
     (function initialLoad() {
@@ -1064,14 +1099,11 @@
       if (idx !== -1) creepers.splice(idx, 1);
     }
 
-    // GLB モデルを非同期ロード → 完了後に初期スポーン
+    // GLB モデルを非同期ロード → 完了後にプレイヤー周囲へ初期スポーン
     function spawnInitialCreepers() {
-      // 広いワールドなので少し多めに、プレイヤー(96,96)から半径15-40の範囲に散らす
-      const positions = [
-        [82, 88], [110, 92], [98, 115], [75, 105], [120, 105],
-        [95, 75], [115, 75], [85, 120], [125, 125], [70, 80],
-      ];
-      for (const [cx, cz] of positions) spawnCreeper(cx, cz);
+      creepersReady = true;
+      let guard = 0;
+      while (creepers.length < CREEPER_TARGET && guard++ < 40) trySpawnCreeperNearPlayer();
     }
     const gltfLoader = new GLTFLoader();
     gltfLoader.load(
@@ -1112,6 +1144,45 @@
     const FUSE_CANCEL_RANGE = 5.0;    // この距離以上離れると起爆キャンセル
     const EXPLOSION_RADIUS = 3.0;     // 爆発でブロック破壊する半径
     const EXPLOSION_MAX_DAMAGE = 18;  // ゼロ距離での最大ダメージ
+
+    // ===== クリーパーの個体数管理 (無限ワールド: 周囲に湧かせ、遠ざかると消す) =====
+    const CREEPER_TARGET = 10;        // プレイヤー周囲に保つ個体数
+    const CREEPER_SPAWN_MIN = 28;     // この距離より近くには湧かない (視界25の外側)
+    const CREEPER_SPAWN_MAX = 55;     // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
+    const CREEPER_DESPAWN_DIST = 72;  // この距離以上離れたら消す (地形がアンロードされる前に)
+    const CREEPER_SPAWN_INTERVAL = 3; // 補充判定の間隔 (秒)
+    let creepersReady = false;        // GLBロード後に true
+    let creeperSpawnTimer = 0;
+
+    // プレイヤーの周囲(リング状)の地面にクリーパーを1体湧かせる
+    function trySpawnCreeperNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = CREEPER_SPAWN_MIN + Math.random() * (CREEPER_SPAWN_MAX - CREEPER_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null) { spawnCreeper(x, z); return true; }
+      }
+      return false;
+    }
+
+    // 遠い個体を消し、不足ぶんを定期補充する
+    function manageCreepers(dt) {
+      if (!creepersReady) return;
+      const D2 = CREEPER_DESPAWN_DIST * CREEPER_DESPAWN_DIST;
+      for (let i = creepers.length - 1; i >= 0; i--) {
+        const c = creepers[i];
+        if (c.userData.fuseTime > 0) continue;  // 起爆中は消さない
+        const dx = camera.position.x - c.position.x;
+        const dz = camera.position.z - c.position.z;
+        if (dx * dx + dz * dz > D2) killCreeper(c);
+      }
+      creeperSpawnTimer += dt;
+      if (creeperSpawnTimer >= CREEPER_SPAWN_INTERVAL) {
+        creeperSpawnTimer = 0;
+        if (creepers.length < CREEPER_TARGET) trySpawnCreeperNearPlayer();
+      }
+    }
 
     // ===== 爆発パーティクル =====
     const explosionParticles = [];
@@ -1695,8 +1766,9 @@
         // 無限地形ストリーミング: 周囲を生成・遠方を破棄
         updateStreaming();
 
-        // 敵Mob (クリーパー) の更新
+        // 敵Mob (クリーパー) の更新 + 個体数管理 (周囲に湧かせ遠方を消す)
         updateCreepers(dt);
+        manageCreepers(dt);
 
         // HP の自然回復 (被弾後の待機時間を超えたら徐々に回復)
         if (playerHP > 0 && playerHP < PLAYER_MAX_HP) {
