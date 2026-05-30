@@ -129,6 +129,51 @@
     /* ホットバーのスロットをタップ可能に */
     .slot { pointer-events: auto; cursor: pointer; }
 
+    /* クラフト */
+    #craftbtn {
+      position: absolute; top: 12px; right: 12px; z-index: 30;
+      background: rgba(0,0,0,0.55); color: #fff;
+      border: 2px solid #888; border-radius: 6px;
+      padding: 8px 12px; font-size: 14px; cursor: pointer;
+      pointer-events: auto; font-family: inherit;
+    }
+    #craftbtn:hover { background: rgba(255,255,255,0.18); }
+    #craftpanel {
+      position: absolute; inset: 0; z-index: 100; display: none;
+      background: rgba(0,0,0,0.72);
+      align-items: center; justify-content: center; pointer-events: auto;
+    }
+    #craftpanel .panel {
+      background: #2b2b2b; border: 2px solid #888; border-radius: 10px;
+      padding: 16px 20px 20px; max-width: 580px; width: 90%;
+      max-height: 80vh; overflow: auto; color: #fff;
+      font-family: sans-serif;
+    }
+    #craftpanel h2 { margin: 0 0 2px; font-size: 20px; }
+    #craftpanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
+    #craftpanel .grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px;
+    }
+    .recipe {
+      background: #3a3a3a; border: 1px solid #555; border-radius: 8px;
+      padding: 10px 8px; text-align: center; cursor: pointer; transition: background .1s;
+    }
+    .recipe:hover { background: #484848; }
+    .recipe img { width: 44px; height: 44px; image-rendering: pixelated; }
+    .recipe .rname { font-size: 13px; font-weight: bold; margin: 5px 0 3px; }
+    .recipe .rcost { font-size: 11px; opacity: 0.85; }
+    .recipe.locked { opacity: 0.45; cursor: not-allowed; }
+    .recipe.locked:hover { background: #3a3a3a; }
+    .recipe.owned { opacity: 0.55; cursor: default; }
+    .recipe.owned:hover { background: #3a3a3a; }
+    .recipe.owned .rcost { color: #9fe6c4; }
+    #craftclose {
+      float: right; cursor: pointer; border: none;
+      background: #555; color: #fff; border-radius: 5px;
+      padding: 2px 11px; font-size: 18px; line-height: 1.3;
+    }
+    #craftclose:hover { background: #777; }
+
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
       position: absolute;
@@ -250,7 +295,8 @@
       { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.5, depthWrite: false, unlit: true } },
       { name: '溶岩',   color: 0xE2552B, tex: 'textures/lava.png', hardness: 0.1, matOpts: { emissive: 0xFF6A00, emissiveIntensity: 0.7, emissiveMap: true } },
     ];
-    let selectedBlock = 0;
+    let selectedSlot = 0;       // ホットバー(所持品リスト)内の選択位置
+    let craftingOpen = false;   // クラフトメニュー表示中フラグ
     const WATER_INDEX = blockTypes.findIndex((b) => b.name === '水');
     const LAVA_INDEX  = blockTypes.findIndex((b) => b.name === '溶岩');
 
@@ -293,45 +339,219 @@
     });
 
     // ===== インベントリ & ホットバー =====
-    const inventory = blockTypes.map(() => 0);  // 各種類の所持数 (初期0)
+    const inventory = blockTypes.map(() => 0);  // 各ブロックの所持数 (初期0)
     const hotbarEl = document.getElementById('hotbar');
     const slotEls = [];
-    blockTypes.forEach((bt, i) => {
-      const slot = document.createElement('div');
-      slot.className = 'slot';
-      const k = document.createElement('span');
-      k.className = 'key';
-      k.textContent = i + 1;
-      slot.appendChild(k);
-      const img = document.createElement('img');
-      // 配列テクスチャの場合は icon (=上面) を使う
-      img.src = bt.icon || (typeof bt.tex === 'string' ? bt.tex : bt.tex[2]);
-      img.alt = bt.name;
-      slot.appendChild(img);
-      const cnt = document.createElement('span');
-      cnt.className = 'count';
-      slot.appendChild(cnt);
-      hotbarEl.appendChild(slot);
-      slotEls.push({ slot, count: cnt });
-      // タップ/クリックでブロック選択
-      const selectThis = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        selectedBlock = i;
-        updateBlockInfo();
-        updateHotbar();
-      };
-      slot.addEventListener('click', selectThis);
-      slot.addEventListener('touchstart', selectThis, { passive: false });
+
+    // ===== 道具 (ツール) 定義: 4種 × 2ティア =====
+    const blockIndexByName = {};
+    blockTypes.forEach((b, i) => { blockIndexByName[b.name] = i; });
+
+    // 道具アイコン (SVG data URI を生成)
+    function svgDataURI(svg) { return 'data:image/svg+xml,' + encodeURIComponent(svg); }
+    function toolIcon(type, head) {
+      const handle = '#6b4a2b', stroke = '#1a1a1a';
+      let g;
+      if (type === 'pickaxe') {
+        g = `<rect x='10.5' y='6' width='3' height='15' rx='1' fill='${handle}'/>` +
+            `<path d='M3 8 Q12 2.5 21 8 L19.5 11 Q12 6.2 4.5 11 Z' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>`;
+      } else if (type === 'axe') {
+        g = `<rect x='10' y='5' width='3' height='16' rx='1' fill='${handle}'/>` +
+            `<path d='M11 4 Q21 4.5 20 13 Q15 12.5 11 9 Z' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>`;
+      } else if (type === 'shovel') {
+        g = `<rect x='10.5' y='4' width='3' height='12' rx='1' fill='${handle}'/>` +
+            `<path d='M8 13 Q8 22 12 22 Q16 22 16 13 Q12 15 8 13 Z' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>`;
+      } else { // sword
+        g = `<rect x='10.7' y='2' width='2.6' height='13' rx='0.6' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>` +
+            `<rect x='7.5' y='14.5' width='9' height='2.4' rx='1' fill='${handle}'/>` +
+            `<rect x='10.7' y='16.5' width='2.6' height='4.5' rx='1' fill='${handle}'/>`;
+      }
+      return svgDataURI(`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>${g}</svg>`);
+    }
+
+    const _toolTypes = [
+      { type: 'pickaxe', name: 'ツルハシ', blockNames: ['石', 'レンガ', '黒曜石'] },
+      { type: 'axe',     name: '斧',       blockNames: ['木材', '葉'] },
+      { type: 'shovel',  name: 'シャベル', blockNames: ['土', '砂', '草', '雪'] },
+      { type: 'sword',   name: '剣',       blockNames: [] },
+    ];
+    const _toolTiers = [
+      { tier: 'wood',  name: '木の', mat: '木材', cost: 3, speed: 2, attack: 3, head: '#C19A6B' },
+      { tier: 'stone', name: '石の', mat: '石',   cost: 3, speed: 4, attack: 6, head: '#AFAFAF' },
+    ];
+    const TOOL_DEFS = [];
+    _toolTiers.forEach((tier) => {
+      _toolTypes.forEach((tt) => {
+        TOOL_DEFS.push({
+          id: tier.tier + '_' + tt.type,
+          type: tt.type, tier: tier.tier,
+          name: tier.name + tt.name,
+          icon: toolIcon(tt.type, tier.head),
+          speed: tier.speed,
+          attack: tt.type === 'sword' ? tier.attack : 0,
+          blocks: new Set(tt.blockNames.map((n) => blockIndexByName[n])),
+          costMat: blockIndexByName[tier.mat],
+          costQty: tier.cost,
+        });
+      });
     });
-    function updateHotbar() {
-      slotEls.forEach((els, i) => {
-        const c = inventory[i];
-        els.count.textContent = c > 0 ? c : '';
-        els.slot.classList.toggle('empty', c === 0);
-        els.slot.classList.toggle('selected', i === selectedBlock);
+    const toolById = {};
+    TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
+    const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
+
+    // ===== ホットバー: 所持しているブロック + 作成した道具のみ表示 =====
+    let hotbarItems = [];   // { kind:'block', i } | { kind:'tool', id }
+    function itemKey(it) { return it.kind === 'block' ? 'b' + it.i : 't' + it.id; }
+    function computeHotbarItems() {
+      const items = [];
+      blockTypes.forEach((b, i) => { if (inventory[i] > 0) items.push({ kind: 'block', i }); });
+      TOOL_DEFS.forEach((t) => { if (ownedTools[t.id]) items.push({ kind: 'tool', id: t.id }); });
+      return items;
+    }
+    function selectedItem() { return hotbarItems[selectedSlot] || null; }
+    function heldTool() { const it = selectedItem(); return it && it.kind === 'tool' ? toolById[it.id] : null; }
+    function attackDamage() { const t = heldTool(); return PMOB_ATTACK_DAMAGE + (t ? t.attack : 0); }
+
+    function rebuildHotbar() {
+      hotbarEl.innerHTML = '';
+      slotEls.length = 0;
+      hotbarItems.forEach((it, idx) => {
+        const slot = document.createElement('div');
+        slot.className = 'slot';
+        const k = document.createElement('span');
+        k.className = 'key';
+        k.textContent = idx < 9 ? (idx + 1) : '';
+        slot.appendChild(k);
+        const img = document.createElement('img');
+        if (it.kind === 'block') {
+          const bt = blockTypes[it.i];
+          img.src = bt.icon || (typeof bt.tex === 'string' ? bt.tex : bt.tex[2]);
+          img.alt = bt.name;
+        } else {
+          const t = toolById[it.id];
+          img.src = t.icon; img.alt = t.name;
+        }
+        slot.appendChild(img);
+        const cnt = document.createElement('span');
+        cnt.className = 'count';
+        slot.appendChild(cnt);
+        hotbarEl.appendChild(slot);
+        slotEls.push({ slot, count: cnt });
+        const selectThis = (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          selectedSlot = idx;
+          updateBlockInfo();
+          refreshHotbarCounts();
+        };
+        slot.addEventListener('click', selectThis);
+        slot.addEventListener('touchstart', selectThis, { passive: false });
+      });
+      refreshHotbarCounts();
+    }
+    function refreshHotbarCounts() {
+      slotEls.forEach((els, idx) => {
+        const it = hotbarItems[idx];
+        if (!it) return;
+        els.count.textContent = it.kind === 'block' ? (inventory[it.i] > 0 ? inventory[it.i] : '') : '';
+        els.slot.classList.toggle('selected', idx === selectedSlot);
       });
     }
+    let _hotbarSig = null;
+    function updateHotbar() {
+      const prevKey = selectedItem() ? itemKey(selectedItem()) : null;
+      hotbarItems = computeHotbarItems();
+      // 選択していたアイテムが残っていれば選択維持、無ければクランプ
+      if (prevKey) {
+        const idx = hotbarItems.findIndex((it) => itemKey(it) === prevKey);
+        selectedSlot = idx >= 0 ? idx : Math.min(selectedSlot, Math.max(0, hotbarItems.length - 1));
+      } else {
+        selectedSlot = Math.min(selectedSlot, Math.max(0, hotbarItems.length - 1));
+      }
+      const sig = hotbarItems.map(itemKey).join('|');
+      if (sig !== _hotbarSig) { _hotbarSig = sig; rebuildHotbar(); }
+      else { refreshHotbarCounts(); }
+    }
+
+    // ===== クラフト処理 =====
+    function canCraft(t) { return !ownedTools[t.id] && inventory[t.costMat] >= t.costQty; }
+    function craftTool(t) {
+      if (!canCraft(t)) return false;
+      inventory[t.costMat] -= t.costQty;
+      ownedTools[t.id] = true;
+      updateHotbar();
+      refreshCraftPanel();
+      return true;
+    }
+
+    // クラフトUI (パネル + ボタンを動的生成)
+    const craftPanelEl = document.createElement('div');
+    craftPanelEl.id = 'craftpanel';
+    craftPanelEl.innerHTML =
+      '<div class="panel"><button id="craftclose">×</button>' +
+      '<h2>クラフト</h2>' +
+      '<div class="hint">材料を消費して道具を作成。E キーで開閉。道具を選ぶと対応ブロックの採掘が速くなり、剣は攻撃力UP。</div>' +
+      '<div class="grid" id="craftgrid"></div></div>';
+    document.body.appendChild(craftPanelEl);
+    const craftGridEl = craftPanelEl.querySelector('#craftgrid');
+    craftPanelEl.querySelector('#craftclose').addEventListener('click', () => closeCrafting(true));
+    craftPanelEl.addEventListener('click', (e) => { if (e.target === craftPanelEl) closeCrafting(true); });
+
+    const craftBtnEl = document.createElement('button');
+    craftBtnEl.id = 'craftbtn';
+    craftBtnEl.textContent = 'クラフト';
+    document.body.appendChild(craftBtnEl);
+    const toggleCraft = (e) => { e.preventDefault(); e.stopPropagation(); craftingOpen ? closeCrafting(true) : openCrafting(); };
+    craftBtnEl.addEventListener('click', toggleCraft);
+    craftBtnEl.addEventListener('touchstart', toggleCraft, { passive: false });
+
+    function refreshCraftPanel() {
+      craftGridEl.innerHTML = '';
+      TOOL_DEFS.forEach((t) => {
+        const owned = !!ownedTools[t.id];
+        const ok = canCraft(t);
+        const card = document.createElement('div');
+        card.className = 'recipe' + (owned ? ' owned' : (ok ? '' : ' locked'));
+        const matName = blockTypes[t.costMat].name;
+        const costLine = owned
+          ? '所持済み'
+          : `${matName} × ${t.costQty}（所持 ${inventory[t.costMat]}）`;
+        const img = document.createElement('img');
+        img.src = t.icon; img.alt = t.name;
+        const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = t.name;
+        const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (!owned && ok) card.addEventListener('click', () => craftTool(t));
+        craftGridEl.appendChild(card);
+      });
+    }
+
+    function openCrafting() {
+      if (craftingOpen) return;
+      craftingOpen = true;
+      refreshCraftPanel();
+      craftPanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      // 採掘中なら中断
+      mouseDown = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      // 実ポインタロック中ならカーソルを解放してメニュー操作可能に
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeCrafting(relock) {
+      if (!craftingOpen) return;
+      craftingOpen = false;
+      craftPanelEl.style.display = 'none';
+      if (usingFallback) {
+        document.body.style.cursor = 'none';
+      } else if (relock) {
+        controls.lock();  // クリック等のユーザー操作起点で再ロック
+      } else {
+        startMsg.style.display = 'block';
+      }
+    }
+
     updateHotbar();
 
     // ===== シーン・カメラ・レンダラ =====
@@ -746,7 +966,8 @@
     });
     controls.addEventListener('unlock', () => {
       document.body.style.cursor = '';
-      if (!usingFallback) startMsg.style.display = 'block';
+      // クラフトメニューで意図的にロック解除した場合は開始画面を出さない
+      if (!usingFallback && !craftingOpen) startMsg.style.display = 'block';
     });
 
     // ===== BGM =====
@@ -968,6 +1189,9 @@
     }
 
     addEventListener('keydown', (e) => {
+      // E キーでクラフトメニュー開閉。開いている間は移動入力を無視
+      if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
+      if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
         if (!move.f) {  // 初回押し (キーリピートは無視)
           const now = clock.getElapsedTime();
@@ -982,10 +1206,10 @@
       if (e.code === 'Space' && onGround) velocityY = JUMP;
       if (e.code.startsWith('Digit')) {
         const idx = parseInt(e.code.slice(5)) - 1;
-        if (idx >= 0 && idx < blockTypes.length) {
-          selectedBlock = idx;
+        if (idx >= 0 && idx < hotbarItems.length) {
+          selectedSlot = idx;
           updateBlockInfo();
-          updateHotbar();
+          refreshHotbarCounts();
         }
       }
     });
@@ -998,19 +1222,19 @@
       if (e.code === 'KeyA') move.l = false;
       if (e.code === 'KeyD') move.r = false;
     });
-    // マウスホイールでホットバーを巡回 (数字キー 1-9 で届かない水/溶岩も選べる)
+    // マウスホイールでホットバー(所持品)を巡回
     addEventListener('wheel', (e) => {
-      if (!controls.isLocked) return;
+      if (!controls.isLocked || craftingOpen || hotbarItems.length === 0) return;
       const dir = e.deltaY > 0 ? 1 : -1;
-      selectedBlock = (selectedBlock + dir + blockTypes.length) % blockTypes.length;
+      selectedSlot = (selectedSlot + dir + hotbarItems.length) % hotbarItems.length;
       updateBlockInfo();
-      updateHotbar();
+      refreshHotbarCounts();
     }, { passive: true });
 
     function updateBlockInfo() {
-      const bt = blockTypes[selectedBlock];
-      document.getElementById('blockinfo').textContent =
-        `選択中: ${bt.name}  (${selectedBlock + 1}/${blockTypes.length})`;
+      const it = selectedItem();
+      const name = !it ? 'なし' : (it.kind === 'block' ? blockTypes[it.i].name : toolById[it.id].name);
+      document.getElementById('blockinfo').textContent = `選択中: ${name}`;
     }
 
     // ===== クリック処理 =====
@@ -1026,7 +1250,7 @@
     const breakFillEl = document.getElementById('breakfill');
 
     addEventListener('mousedown', (e) => {
-      if (!controls.isLocked) return;
+      if (!controls.isLocked || craftingOpen) return;
       raycaster.setFromCamera(centerScreen, camera);
       // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
@@ -1053,13 +1277,13 @@
         return;
       }
 
-      // 受動Mob (ブタ・村人): 左クリックで攻撃
+      // 受動Mob (ブタ・村人): 左クリックで攻撃 (剣装備中はダメージUP)
       if (hitType === 'passive') {
         if (e.button === 0) {
           let g = hit.object;
           while (g && !passiveMobs.includes(g)) g = g.parent;
           if (g) {
-            hitPassiveMob(g);
+            hitPassiveMob(g, attackDamage());
             startHandSwing();
           }
         }
@@ -1075,14 +1299,17 @@
         mineStrikeCount = 0;
         startHandSwing();
       } else if (e.button === 2) {
-        if (inventory[selectedBlock] <= 0) return;
+        // 設置: 選択中がブロックのときのみ
+        const it = selectedItem();
+        if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
+        const bi = it.i;
         const n = hit.face.normal;
         const px = Math.round(info.x + n.x);
         const py = Math.round(info.y + n.y);
         const pz = Math.round(info.z + n.z);
-        if (addBlock(px, py, pz, selectedBlock)) {
-          recordEdit(px, py, pz, selectedBlock);  // 改変として記録 (戻っても残る)
-          inventory[selectedBlock]--;
+        if (addBlock(px, py, pz, bi)) {
+          recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
+          inventory[bi]--;
           updateHotbar();
           startHandSwing();
         }
@@ -1547,9 +1774,9 @@
       if (idx !== -1) passiveMobs.splice(idx, 1);
     }
 
-    // クリック攻撃: ダメージ → 死亡 or 逃走開始
-    function hitPassiveMob(group) {
-      group.userData.hp -= PMOB_ATTACK_DAMAGE;
+    // クリック攻撃: ダメージ → 死亡 or 逃走開始 (damage 省略時は素手)
+    function hitPassiveMob(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.6;
       if (group.userData.hp <= 0) { killPassiveMob(group); return; }
       // プレイヤーと反対方向へ逃げる
@@ -1991,8 +2218,10 @@
       placeBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!controls.isLocked) return;
-        if (inventory[selectedBlock] <= 0) return;
+        if (!controls.isLocked || craftingOpen) return;
+        const it = selectedItem();
+        if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
+        const bi = it.i;
         raycaster.setFromCamera(centerScreen, camera);
         const hits = raycaster.intersectObjects(instancedMeshes, false);
         if (hits.length === 0 || hits[0].distance > 8) return;
@@ -2002,9 +2231,9 @@
         const px = Math.round(info.x + n.x);
         const py = Math.round(info.y + n.y);
         const pz = Math.round(info.z + n.z);
-        if (addBlock(px, py, pz, selectedBlock)) {
-          recordEdit(px, py, pz, selectedBlock);  // 改変として記録 (戻っても残る)
-          inventory[selectedBlock]--;
+        if (addBlock(px, py, pz, bi)) {
+          recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
+          inventory[bi]--;
           updateHotbar();
           startHandSwing();
         }
@@ -2018,7 +2247,7 @@
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);  // フレーム飛び対策
 
-      if (controls.isLocked) {
+      if (controls.isLocked && !craftingOpen) {
         const fwd = (move.f ? 1 : 0) - (move.b ? 1 : 0);
         const side = (move.r ? 1 : 0) - (move.l ? 1 : 0);
 
@@ -2166,7 +2395,10 @@
               breakProgress = 0;
             }
             const hardness = blockTypes[info.typeIndex].hardness;
-            breakProgress += dt;
+            // 道具装備中: 対応ブロックなら採掘速度UP
+            const tool = heldTool();
+            const speedMult = (tool && tool.blocks.has(info.typeIndex)) ? tool.speed : 1;
+            breakProgress += dt * speedMult;
             breakBarEl.style.display = 'block';
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
             if (breakProgress >= hardness) {
