@@ -1028,23 +1028,38 @@
     addEventListener('mousedown', (e) => {
       if (!controls.isLocked) return;
       raycaster.setFromCamera(centerScreen, camera);
-      // Block (InstancedMesh) と Creeper を別レイキャスト
+      // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
       const creeperHits = raycaster.intersectObjects(creepers, true);
+      const passiveHits = raycaster.intersectObjects(passiveMobs, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
-      let hit, isCreeper = false;
-      if (ch && (!bh || ch.distance < bh.distance)) { hit = ch; isCreeper = true; }
-      else if (bh) hit = bh;
+      const ph = passiveHits[0];
+      let hit = bh, hitType = bh ? 'block' : null;
+      if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
+      if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
       if (!hit || hit.distance > 8) return;
 
       // クリーパー
-      if (isCreeper) {
+      if (hitType === 'creeper') {
         if (e.button === 0) {
           let g = hit.object;
           while (g && !creepers.includes(g)) g = g.parent;
           if (g) {
             killCreeper(g);
+            startHandSwing();
+          }
+        }
+        return;
+      }
+
+      // 受動Mob (ブタ・村人): 左クリックで攻撃
+      if (hitType === 'passive') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !passiveMobs.includes(g)) g = g.parent;
+          if (g) {
+            hitPassiveMob(g);
             startHandSwing();
           }
         }
@@ -1474,6 +1489,186 @@
         c.position.y = newY;
       }
     }
+
+    // ===== 受動Mob (ブタ・村人) - 本家同様に平和的に徘徊、攻撃すると逃げる =====
+    const passiveMobs = [];
+    const PMOB_DEFS = [
+      { key: 'pig',      file: '3D/Pig.glb',      height: 0.9, target: 6, speed: 1.2, hp: 10, facing: 0, template: null },
+      { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null },
+    ];
+    const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
+    const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
+    const PMOB_DESPAWN_DIST = 70;     // この距離以上離れたら消す
+    const PMOB_SPAWN_INTERVAL = 4;    // 補充判定の間隔 (秒)
+    const PMOB_STEP_HEIGHT = 1.1;     // この高さまで登れる
+    const PMOB_ATTACK_DAMAGE = 4;     // 1クリックの与ダメージ
+    const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
+    const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
+    let pmobSpawnTimer = 0;
+
+    function countPassiveMobs(def) {
+      let n = 0;
+      for (const m of passiveMobs) if (m.userData.def === def) n++;
+      return n;
+    }
+
+    function spawnPassiveMob(def, x, z) {
+      if (!def.template) return;
+      const group = def.template.clone(true);
+      // 個別フラッシュのため各メッシュのマテリアルをこの個体専用にクローン
+      group.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.userData.mobGroup = group;
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map(m => m.clone());
+          obj.userData.origColors = obj.material.map(m => m.color.clone());
+        } else if (obj.material) {
+          obj.material = obj.material.clone();
+          obj.userData.origColors = [obj.material.color.clone()];
+        }
+      });
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.def = def;
+      group.userData.hp = def.hp;
+      group.userData.state = 'pause';
+      group.userData.stateTimer = 0.5 + Math.random() * 2;
+      group.userData.heading = Math.random() * Math.PI * 2;
+      group.userData.fleeTimer = 0;
+      group.userData.hitFlash = 0;
+      group.rotation.y = group.userData.heading + def.facing;
+      scene.add(group);
+      passiveMobs.push(group);
+    }
+
+    function killPassiveMob(group) {
+      scene.remove(group);
+      const idx = passiveMobs.indexOf(group);
+      if (idx !== -1) passiveMobs.splice(idx, 1);
+    }
+
+    // クリック攻撃: ダメージ → 死亡 or 逃走開始
+    function hitPassiveMob(group) {
+      group.userData.hp -= PMOB_ATTACK_DAMAGE;
+      group.userData.hitFlash = 0.6;
+      if (group.userData.hp <= 0) { killPassiveMob(group); return; }
+      // プレイヤーと反対方向へ逃げる
+      const dx = group.position.x - camera.position.x;
+      const dz = group.position.z - camera.position.z;
+      group.userData.heading = Math.atan2(dx, dz);
+      group.userData.state = 'flee';
+      group.userData.fleeTimer = PMOB_FLEE_DURATION;
+    }
+
+    function trySpawnPassiveMobNearPlayer(def) {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = PMOB_SPAWN_MIN + Math.random() * (PMOB_SPAWN_MAX - PMOB_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null) { spawnPassiveMob(def, x, z); return true; }
+      }
+      return false;
+    }
+
+    // 遠い個体を消し、不足ぶんを定期補充
+    function managePassiveMobs(dt) {
+      const D2 = PMOB_DESPAWN_DIST * PMOB_DESPAWN_DIST;
+      for (let i = passiveMobs.length - 1; i >= 0; i--) {
+        const m = passiveMobs[i];
+        const dx = camera.position.x - m.position.x;
+        const dz = camera.position.z - m.position.z;
+        if (dx * dx + dz * dz > D2) killPassiveMob(m);
+      }
+      pmobSpawnTimer += dt;
+      if (pmobSpawnTimer >= PMOB_SPAWN_INTERVAL) {
+        pmobSpawnTimer = 0;
+        for (const def of PMOB_DEFS) {
+          if (!def.template) continue;
+          if (countPassiveMobs(def) < def.target) trySpawnPassiveMobNearPlayer(def);
+        }
+      }
+    }
+
+    function updatePassiveMobs(dt) {
+      for (let i = passiveMobs.length - 1; i >= 0; i--) {
+        const m = passiveMobs[i];
+        const ud = m.userData;
+        const def = ud.def;
+
+        // 被弾フラッシュの減衰
+        if (ud.hitFlash > 0) {
+          ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2);
+          setCreeperFlash(m, ud.hitFlash);  // 汎用フラッシュ (任意のGroupに適用可)
+        }
+
+        ud.stateTimer -= dt;
+
+        // 停止中: タイマー切れで歩き出す
+        if (ud.state === 'pause') {
+          if (ud.stateTimer <= 0) {
+            ud.state = 'walk';
+            ud.heading = Math.random() * Math.PI * 2;
+            ud.stateTimer = 2 + Math.random() * 4;
+          }
+          continue;
+        }
+
+        // 逃走 → 時間切れで通常歩行へ
+        if (ud.state === 'flee') {
+          ud.fleeTimer -= dt;
+          if (ud.fleeTimer <= 0) { ud.state = 'walk'; ud.stateTimer = 2 + Math.random() * 3; }
+        } else if (ud.state === 'walk' && ud.stateTimer <= 0) {
+          ud.state = 'pause';
+          ud.stateTimer = 1 + Math.random() * 3;
+          continue;
+        }
+
+        const speed = def.speed * (ud.state === 'flee' ? PMOB_FLEE_SPEED_MULT : 1);
+        const dirX = Math.sin(ud.heading);
+        const dirZ = Math.cos(ud.heading);
+        const newX = m.position.x + dirX * speed * dt;
+        const newZ = m.position.z + dirZ * speed * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null || newY - m.position.y > PMOB_STEP_HEIGHT) {
+          // 壁/崖: 向きを変える
+          ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
+          continue;
+        }
+        m.position.x = newX;
+        m.position.z = newZ;
+        m.position.y = newY;
+        m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;  // 進行方向を向く
+      }
+    }
+
+    // GLB テンプレートを非同期ロード → 完了後に初期スポーン (gltfLoader はクリーパー側で定義済み)
+    PMOB_DEFS.forEach((def) => {
+      gltfLoader.load(
+        def.file,
+        (gltf) => {
+          const model = gltf.scene;
+          // 自動スケール (def.height マスに正規化)
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          if (size.y > 0) model.scale.setScalar(def.height / size.y);
+          // 足元 = y=0 になるようシフト
+          model.updateMatrixWorld();
+          const box2 = new THREE.Box3().setFromObject(model);
+          model.position.y -= box2.min.y;
+          const wrapper = new THREE.Group();
+          wrapper.add(model);
+          def.template = wrapper;
+          // 初期スポーン
+          let guard = 0;
+          while (countPassiveMobs(def) < def.target && guard++ < 30) {
+            if (!trySpawnPassiveMobNearPlayer(def)) break;
+          }
+        },
+        undefined,
+        (err) => { console.warn(def.file + ' ロード失敗:', err); }
+      );
+    });
 
     // ===== 時間 & 天気 =====
     const DAY_DURATION = 120;  // 秒 (2分で1日)
@@ -1940,6 +2135,10 @@
         // 敵Mob (クリーパー) の更新 + 個体数管理 (周囲に湧かせ遠方を消す)
         updateCreepers(dt);
         manageCreepers(dt);
+
+        // 受動Mob (ブタ・村人) の徘徊 + 個体数管理
+        updatePassiveMobs(dt);
+        managePassiveMobs(dt);
 
         // HP の自然回復 (被弾後の待機時間を超えたら徐々に回復)
         if (playerHP > 0 && playerHP < PLAYER_MAX_HP) {
