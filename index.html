@@ -365,6 +365,11 @@
       im.castShadow = false;
       im.receiveShadow = false;
       im.frustumCulled = false;  // 全領域常に描画 (個別カリングは内部処理)
+      // インスタンスは地形ストリーミングで動き回るため、レイキャスト用の
+      // バウンディングスフィアを無限大に固定する。これをしないと初回レイキャスト時に
+      // 計算された球が再計算されず、プレイヤーが遠くへ移動すると球カリングで弾かれて
+      // クリック(破壊/設置)が反応しなくなる。
+      im.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), Infinity);
       scene.add(im);
       instancedMeshes.push(im);
       instancePositions.push([]);
