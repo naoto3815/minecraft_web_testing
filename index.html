@@ -460,13 +460,20 @@
     // ===== 素材アイテム (モブ撃破で手に入る。ブロックとは別管理) =====
     // food を持つ素材は選択して右クリックで食べると HP 回復。
     const MATERIAL_DEFS = [
-      { id: 'porkchop',  name: '生豚肉',         color: 0xE8907E, label: '豚', food: 4 },
-      { id: 'chicken',   name: '生の鶏肉',       color: 0xE7B98A, label: '鶏', food: 2 },
-      { id: 'feather',   name: '羽根',           color: 0xF2F2F2, label: '羽' },
-      { id: 'slimeball', name: 'スライムボール', color: 0x77C043, label: 'ス' },
-      { id: 'gunpowder', name: '火薬',           color: 0x6B6B6B, label: '火' },
-      { id: 'emerald',   name: 'エメラルド',     color: 0x2ECC71, label: '緑' },
-      { id: 'echoshard', name: 'エコーシャード', color: 0x2BD1C4, label: '響' },
+      { id: 'porkchop',   name: '生豚肉',         color: 0xE8907E, label: '豚', food: 4 },
+      { id: 'beef',       name: '生の牛肉',       color: 0xC8554C, label: '牛', food: 4 },
+      { id: 'chicken',    name: '生の鶏肉',       color: 0xE7B98A, label: '鶏', food: 2 },
+      { id: 'rabbitmeat', name: '生のうさぎ肉',   color: 0xE08A6E, label: '兎', food: 3 },
+      { id: 'rawfish',    name: '生魚',           color: 0x6FB6C8, label: '魚', food: 2 },
+      { id: 'rottenflesh',name: '腐った肉',       color: 0x6E8A4C, label: '腐', food: 1 },
+      { id: 'feather',    name: '羽根',           color: 0xF2F2F2, label: '羽' },
+      { id: 'leather',    name: '革',             color: 0x8A5A2B, label: '革' },
+      { id: 'rabbithide', name: 'うさぎの皮',     color: 0xB98A5E, label: '皮' },
+      { id: 'slimeball',  name: 'スライムボール', color: 0x77C043, label: 'ス' },
+      { id: 'gunpowder',  name: '火薬',           color: 0x6B6B6B, label: '火' },
+      { id: 'iron',       name: '鉄インゴット',   color: 0xD8D8D8, label: '鉄' },
+      { id: 'emerald',    name: 'エメラルド',     color: 0x2ECC71, label: '緑' },
+      { id: 'echoshard',  name: 'エコーシャード', color: 0x2BD1C4, label: '響' },
     ];
     function matIcon(m) {
       const hex = '#' + m.color.toString(16).padStart(6, '0');
@@ -484,12 +491,18 @@
 
     // モブ別ドロップ表 (min..max 個を一様乱数で。0 を含むものは出ないこともある)
     const MOB_DROPS = {
-      pig:      [{ id: 'porkchop',  min: 1, max: 3 }],
-      chicken:  [{ id: 'chicken',   min: 1, max: 1 }, { id: 'feather', min: 0, max: 2 }],
-      slime:    [{ id: 'slimeball', min: 1, max: 2 }],
-      villager: [{ id: 'emerald',   min: 0, max: 1 }],
-      creeper:  [{ id: 'gunpowder', min: 0, max: 2 }],
-      warden:   [{ id: 'echoshard', min: 1, max: 1 }],
+      pig:      [{ id: 'porkchop',   min: 1, max: 3 }],
+      cow:      [{ id: 'beef',       min: 1, max: 3 }, { id: 'leather', min: 0, max: 2 }],
+      chicken:  [{ id: 'chicken',    min: 1, max: 1 }, { id: 'feather', min: 0, max: 2 }],
+      rabbit:   [{ id: 'rabbitmeat', min: 0, max: 1 }, { id: 'rabbithide', min: 0, max: 1 }],
+      horse:    [{ id: 'leather',    min: 0, max: 2 }],
+      slime:    [{ id: 'slimeball',  min: 1, max: 2 }],
+      villager: [{ id: 'emerald',    min: 0, max: 1 }],
+      fish:     [{ id: 'rawfish',    min: 1, max: 1 }],
+      creeper:  [{ id: 'gunpowder',  min: 0, max: 2 }],
+      zombie:   [{ id: 'rottenflesh', min: 0, max: 2 }],
+      golem:    [{ id: 'iron',       min: 3, max: 5 }],
+      warden:   [{ id: 'echoshard',  min: 1, max: 1 }],
     };
 
     // ===== ホットバー: 所持しているブロック + 作成した道具のみ表示 =====
@@ -1795,16 +1808,25 @@
       // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
       const creeperHits = raycaster.intersectObjects(creepers, true);
-      // 受動Mob・ウォーデンは不可視ボックスコライダのみを対象に (細かいメッシュより当たり判定が正確)
+      // 受動Mob・ウォーデン等は不可視ボックスコライダのみを対象に (細かいメッシュより当たり判定が正確)
       const passiveHits = raycaster.intersectObjects(passiveColliders, false);
       const wardenHits = raycaster.intersectObjects(wardenColliders, false);
+      const fishHits = raycaster.intersectObjects(fishColliders, false);
+      const zombieHits = raycaster.intersectObjects(zombieColliders, false);
+      const golemHits = raycaster.intersectObjects(golemColliders, false);
       const bh = blockHits[0];
       const ch = creeperHits[0];
       const ph = passiveHits[0];
       const wh = wardenHits[0];
+      const fh = fishHits[0];
+      const zh = zombieHits[0];
+      const gh = golemHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
       if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
+      if (zh && (!hit || zh.distance < hit.distance)) { hit = zh; hitType = 'zombie'; }
+      if (gh && (!hit || gh.distance < hit.distance)) { hit = gh; hitType = 'golem'; }
+      if (fh && (!hit || fh.distance < hit.distance)) { hit = fh; hitType = 'fish'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
       if (!hit || hit.distance > 8) return;
 
@@ -1814,6 +1836,36 @@
           let g = hit.object;
           while (g && !wardens.includes(g)) g = g.parent;
           if (g) { hitWarden(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
+
+      // ゾンビ: 左クリックで攻撃 (HP制)
+      if (hitType === 'zombie') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !zombies.includes(g)) g = g.parent;
+          if (g) { hitZombie(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
+
+      // アイアンゴーレム: 左クリックで攻撃 (HP制。中立なので殴っても反撃はしない)
+      if (hitType === 'golem') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !golems.includes(g)) g = g.parent;
+          if (g) { hitGolem(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
+
+      // 魚: 左クリックで攻撃 (HP制)
+      if (hitType === 'fish') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !fishes.includes(g)) g = g.parent;
+          if (g) { hitFish(g, attackDamage()); startHandSwing(); }
         }
         return;
       }
@@ -1948,6 +2000,22 @@
       return depth;
     }
     const MOB_DEEP_WATER = 2;  // この深さ以上の水は Mob が避ける (浅瀬の歩行は許容)
+
+    // (x,y,z) のセルが水ブロックか? — 魚が水中に留まる/陸で窒息する判定に使う
+    function isWaterAt(x, y, z) {
+      const e = blocks.get(key(Math.round(x), Math.round(y), Math.round(z)));
+      return e !== undefined && e.typeIndex === WATER_INDEX;
+    }
+
+    // (x,y,z) の真上が空 (固体ブロックに覆われていない) か? — ゾンビが日光で焼ける判定に使う
+    function isSkyExposed(x, y, z) {
+      const px = Math.round(x), pz = Math.round(z);
+      const top = Math.round(y) + 1;
+      for (let yy = top; yy <= 40; yy++) {
+        if (isSolidAt(px, yy, pz)) return false;
+      }
+      return true;
+    }
 
     // ===== Mob 共通: 段差の上り下りを瞬間移動でなく、なめらかに(+小さくジャンプして)見せる =====
     const MOB_VERT_SMOOTH = 14;        // 実Yを論理接地高さへ寄せる速さ (大=速い)
@@ -2676,6 +2744,562 @@
       (err) => { console.warn('Warden.glb ロード失敗:', err); }
     );
 
+    // ===== Mob 共通: GLBロード/インスタンス生成のヘルパ (新規Mobで再利用) =====
+    // GLBを高さ height マスに正規化し、足元 y=0 に揃えてラッパーGroupに包む。
+    function loadMobGLB(file, height, facingOffset, onReady) {
+      gltfLoader.load(
+        file,
+        (gltf) => {
+          const model = gltf.scene;
+          const box = new THREE.Box3().setFromObject(model);
+          const size = box.getSize(new THREE.Vector3());
+          if (size.y > 0) model.scale.setScalar(height / size.y);
+          model.updateMatrixWorld();
+          const box2 = new THREE.Box3().setFromObject(model);
+          model.position.y -= box2.min.y;  // 足元 = y=0
+          model.rotation.y = facingOffset || 0;
+          const wrapper = new THREE.Group();
+          wrapper.add(model);
+          onReady(wrapper);
+        },
+        undefined,
+        (err) => { console.warn(file + ' ロード失敗:', err); }
+      );
+    }
+    // テンプレートを複製し、個別フラッシュ用に各メッシュのマテリアルを専用クローンに差し替える。
+    function cloneMobInstance(template, groupTag) {
+      const group = template.clone(true);
+      group.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.userData[groupTag] = group;
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map(m => m.clone());
+          obj.userData.origColors = obj.material.map(m => m.color.clone());
+        } else if (obj.material) {
+          obj.material = obj.material.clone();
+          obj.userData.origColors = [obj.material.color.clone()];
+        }
+      });
+      return group;
+    }
+
+    // ===== 魚 (水棲Mob) - 本家準拠: 水中だけを泳ぎ、陸に出るとピチピチ跳ねて窒息死する =====
+    const fishes = [];
+    const fishColliders = [];   // 不可視ボックス (クリック判定の単一ソース)
+    const _fishColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    let fishModelTemplate = null;
+    let fishesReady = false;
+
+    const FISH_HEIGHT = 0.5;
+    const FISH_FACING_OFFSET = 0;
+    const FISH_HP = 3;
+    const FISH_SPEED = 1.6;
+    const FISH_TARGET = 6;
+    const FISH_SPAWN_MIN = 14;
+    const FISH_SPAWN_MAX = 46;
+    const FISH_DESPAWN_DIST = 70;
+    const FISH_SPAWN_INTERVAL = 5;
+    const FISH_SUFFOCATE_INTERVAL = 0.6;  // 陸での窒息ダメージ間隔(秒)
+    const FISH_SUFFOCATE_DAMAGE = 1;
+    const FISH_GRAVITY = 12;
+    let fishSpawnTimer = 0;
+
+    // (x,z) の水柱 { bed:固体上面, surface:水面 }。深さ2未満(泳げない)なら null
+    function fishWaterColumn(x, z) {
+      const bed = creeperGroundY(x, z);
+      if (bed === null) return null;
+      const depth = waterDepthAt(x, z);
+      if (depth < 2) return null;
+      return { bed, surface: bed + depth };
+    }
+
+    function spawnFish(x, z) {
+      if (!fishModelTemplate) return;
+      const col = fishWaterColumn(x, z);
+      if (!col) return;
+      const group = cloneMobInstance(fishModelTemplate, 'fishGroup');
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(0.5, FISH_HEIGHT, 0.5), _fishColliderMat);
+      collider.position.y = FISH_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.fishGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      fishColliders.push(collider);
+      const swimY = col.bed + 0.3 + Math.random() * Math.max(0.1, (col.surface - col.bed) - 0.6);
+      group.position.set(x, swimY, z);
+      group.userData.hp = FISH_HP;
+      group.userData.hitFlash = 0;
+      group.userData.heading = Math.random() * Math.PI * 2;
+      group.userData.turnTimer = 1 + Math.random() * 2;
+      group.userData.bobPhase = Math.random() * Math.PI * 2;
+      group.userData.vy = 0;              // 陸での落下速度
+      group.userData.suffocateTimer = 0;
+      group.userData.flopTimer = 0;
+      group.rotation.y = group.userData.heading + FISH_FACING_OFFSET;
+      scene.add(group);
+      fishes.push(group);
+    }
+
+    function killFish(group, drop) {
+      if (drop) dropMobLoot('fish', group.position.x, group.position.y, group.position.z);
+      scene.remove(group);
+      const idx = fishes.indexOf(group);
+      if (idx !== -1) fishes.splice(idx, 1);
+      const ci = fishColliders.indexOf(group.userData.collider);
+      if (ci !== -1) fishColliders.splice(ci, 1);
+    }
+
+    function hitFish(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
+      group.userData.hitFlash = 0.6;
+      if (group.userData.hp <= 0) killFish(group, true);
+    }
+
+    function trySpawnFishNearPlayer() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = FISH_SPAWN_MIN + Math.random() * (FISH_SPAWN_MAX - FISH_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (fishWaterColumn(x, z)) { spawnFish(x, z); return true; }
+      }
+      return false;
+    }
+
+    function manageFish(dt) {
+      if (!fishesReady) return;
+      const D2 = FISH_DESPAWN_DIST * FISH_DESPAWN_DIST;
+      for (let i = fishes.length - 1; i >= 0; i--) {
+        const f = fishes[i];
+        const dx = camera.position.x - f.position.x;
+        const dz = camera.position.z - f.position.z;
+        if (dx * dx + dz * dz > D2) killFish(f);
+      }
+      fishSpawnTimer += dt;
+      if (fishSpawnTimer >= FISH_SPAWN_INTERVAL) {
+        fishSpawnTimer = 0;
+        if (fishes.length < FISH_TARGET) trySpawnFishNearPlayer();
+      }
+    }
+
+    function updateFish(dt) {
+      for (let i = fishes.length - 1; i >= 0; i--) {
+        const f = fishes[i];
+        const ud = f.userData;
+        if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(f, ud.hitFlash); }
+
+        const inWater = isWaterAt(f.position.x, f.position.y, f.position.z);
+        if (!inWater) {
+          // --- 陸 (水なし): 落下 → ピチピチ跳ねながら窒息していく ---
+          ud.vy -= FISH_GRAVITY * dt;
+          let ny = f.position.y + ud.vy * dt;
+          const gy = creeperGroundY(f.position.x, f.position.z);
+          const restY = (gy !== null ? gy : BEDROCK_Y);
+          if (ny <= restY) { ny = restY; ud.vy = 0; }
+          ud.flopTimer -= dt;
+          if (ud.vy === 0 && ud.flopTimer <= 0) {
+            ud.vy = 2.2 + Math.random() * 1.5;            // ピチッと跳ねる
+            ud.flopTimer = 0.4 + Math.random() * 0.5;
+            ud.heading = Math.random() * Math.PI * 2;
+          }
+          f.position.y = ny;
+          f.rotation.y = ud.heading + FISH_FACING_OFFSET;
+          f.rotation.z = Math.sin(performance.now() * 0.02) * 0.6;  // のたうつ見た目
+          ud.suffocateTimer += dt;
+          if (ud.suffocateTimer >= FISH_SUFFOCATE_INTERVAL) {
+            ud.suffocateTimer = 0;
+            ud.hp -= FISH_SUFFOCATE_DAMAGE;
+            ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killFish(f, true); continue; }
+          }
+          continue;
+        }
+
+        // --- 水中: ゆったり泳ぎ回る ---
+        f.rotation.z *= (1 - Math.min(1, dt * 6));  // 体の傾きを水平へ戻す
+        ud.suffocateTimer = 0;
+        ud.turnTimer -= dt;
+        if (ud.turnTimer <= 0) {
+          ud.turnTimer = 1 + Math.random() * 2.5;
+          ud.heading += (Math.random() - 0.5) * Math.PI;
+        }
+        const dirX = Math.sin(ud.heading), dirZ = Math.cos(ud.heading);
+        const newX = f.position.x + dirX * FISH_SPEED * dt;
+        const newZ = f.position.z + dirZ * FISH_SPEED * dt;
+        if (!isWaterAt(newX, f.position.y, newZ)) {
+          ud.heading += Math.PI * (0.5 + Math.random() * 0.5);  // 水の縁: 向きを変える
+        } else {
+          f.position.x = newX;
+          f.position.z = newZ;
+        }
+        // 縦: ゆるやかに上下しつつ水柱の範囲に収める
+        ud.bobPhase += dt * 1.5;
+        let ny = f.position.y + Math.sin(ud.bobPhase) * 0.4 * dt;
+        const col = fishWaterColumn(f.position.x, f.position.z);
+        if (col) {
+          const lo = col.bed + 0.3, hi = col.surface - 0.3;
+          if (ny < lo) ny = lo; else if (ny > hi) ny = hi;
+        }
+        f.position.y = ny;
+        f.rotation.y = ud.heading + FISH_FACING_OFFSET;
+      }
+    }
+
+    // ===== ゾンビ (敵Mob) - 本家準拠: 夜に湧き、プレイヤーを追って殴る。日光で燃えて消える =====
+    const zombies = [];
+    const zombieColliders = [];
+    const _zombieColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    let zombieModelTemplate = null;
+    let zombiesReady = false;
+
+    const ZOMBIE_WIDTH = 0.6;
+    const ZOMBIE_HEIGHT = 1.95;
+    const ZOMBIE_FACING_OFFSET = 0;
+    const ZOMBIE_HP = 20;
+    const ZOMBIE_SPEED = 1.4;
+    const ZOMBIE_STEP_HEIGHT = 1.1;
+    const ZOMBIE_SIGHT = 28;
+    const ZOMBIE_MELEE_RANGE = 1.6;
+    const ZOMBIE_MELEE_DAMAGE = 3;
+    const ZOMBIE_MELEE_COOLDOWN = 1.0;
+    const ZOMBIE_TARGET = 7;            // 夜に周囲へ保つ個体数
+    const ZOMBIE_SPAWN_MIN = 24;
+    const ZOMBIE_SPAWN_MAX = 50;
+    const ZOMBIE_DESPAWN_DIST = 72;
+    const ZOMBIE_SPAWN_INTERVAL = 3;
+    const ZOMBIE_BURN_INTERVAL = 0.5;   // 日光で焼けるダメージ間隔(秒)
+    const ZOMBIE_BURN_DAMAGE = 2;
+    let zombieSpawnTimer = 0;
+
+    function spawnZombie(x, z) {
+      if (!zombieModelTemplate) return;
+      const group = cloneMobInstance(zombieModelTemplate, 'zombieGroup');
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(ZOMBIE_WIDTH, ZOMBIE_HEIGHT, ZOMBIE_WIDTH), _zombieColliderMat);
+      collider.position.y = ZOMBIE_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.zombieGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      zombieColliders.push(collider);
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = ZOMBIE_HP;
+      group.userData.maxHp = ZOMBIE_HP;
+      group.userData.hitFlash = 0;
+      group.userData.meleeCd = 0;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+      group.userData.burnTimer = 0;
+      group.userData.groundY = (y !== null ? y : 5);
+      group.userData.footY = group.position.y;
+      group.userData.stepHopT = 0;
+      scene.add(group);
+      zombies.push(group);
+    }
+
+    function killZombie(group, drop) {
+      if (drop) dropMobLoot('zombie', group.position.x, group.position.y, group.position.z);
+      scene.remove(group);
+      const idx = zombies.indexOf(group);
+      if (idx !== -1) zombies.splice(idx, 1);
+      const ci = zombieColliders.indexOf(group.userData.collider);
+      if (ci !== -1) zombieColliders.splice(ci, 1);
+    }
+
+    function hitZombie(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
+      group.userData.hitFlash = 0.5;
+      if (group.userData.hp <= 0) killZombie(group, true);
+    }
+
+    function trySpawnZombieNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = ZOMBIE_SPAWN_MIN + Math.random() * (ZOMBIE_SPAWN_MAX - ZOMBIE_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnZombie(x, z); return true; }
+      }
+      return false;
+    }
+
+    function manageZombies(dt) {
+      if (!zombiesReady) return;
+      const D2 = ZOMBIE_DESPAWN_DIST * ZOMBIE_DESPAWN_DIST;
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        const zm = zombies[i];
+        const dx = camera.position.x - zm.position.x;
+        const dz = camera.position.z - zm.position.z;
+        if (dx * dx + dz * dz > D2) killZombie(zm);
+      }
+      // 夜だけ湧かせる (本家準拠: 昼は新規に湧かず、既存個体は日光で焼けて減る)
+      zombieSpawnTimer += dt;
+      if (zombieSpawnTimer >= ZOMBIE_SPAWN_INTERVAL) {
+        zombieSpawnTimer = 0;
+        if (isNightTime() && zombies.length < ZOMBIE_TARGET) trySpawnZombieNearPlayer();
+      }
+    }
+
+    function updateZombies(dt) {
+      const daytime = daylightStrength() > 0.25;
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        const zm = zombies[i];
+        const ud = zm.userData;
+        // 溶岩ダメージ
+        if (posTouchingLava(zm.position.x, zm.position.y, zm.position.z, ZOMBIE_HEIGHT)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0; ud.hp -= LAVA_DAMAGE; ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killZombie(zm); continue; }
+          }
+        } else { ud.lavaTimer = LAVA_DAMAGE_INTERVAL; }
+
+        // 日光で焼ける (昼 + 頭上が空に開けている)
+        if (daytime && isSkyExposed(zm.position.x, zm.position.y + ZOMBIE_HEIGHT, zm.position.z)) {
+          ud.burnTimer += dt;
+          ud.hitFlash = Math.max(ud.hitFlash, 0.3 + Math.abs(Math.sin(performance.now() * 0.02)) * 0.3);  // チラチラ燃える
+          if (ud.burnTimer >= ZOMBIE_BURN_INTERVAL) {
+            ud.burnTimer = 0; ud.hp -= ZOMBIE_BURN_DAMAGE;
+            if (ud.hp <= 0) { killZombie(zm); continue; }
+          }
+        } else { ud.burnTimer = 0; }
+        if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(zm, ud.hitFlash); }
+
+        stepMobGroupY(zm, dt, MOB_STEP_HOP);  // 段差なめらか + 小ジャンプ
+        ud.meleeCd = Math.max(0, ud.meleeCd - dt);
+
+        const dx = camera.position.x - zm.position.x;
+        const dz = camera.position.z - zm.position.z;
+        const dy = camera.position.y - zm.position.y;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > ZOMBIE_SIGHT) continue;
+        zm.rotation.y = Math.atan2(dx, dz) + ZOMBIE_FACING_OFFSET;
+
+        // 近接攻撃 (張り付いて殴る)
+        if (dist < ZOMBIE_MELEE_RANGE && Math.abs(dy) < 2.5) {
+          if (ud.meleeCd <= 0) {
+            damagePlayer(ZOMBIE_MELEE_DAMAGE);
+            ud.meleeCd = ZOMBIE_MELEE_COOLDOWN;
+            zm.scale.setScalar(1.08);
+            setTimeout(() => { if (zm.parent) zm.scale.setScalar(1); }, 100);
+          }
+          continue;
+        }
+
+        // 通常移動 (プレイヤーを追う)
+        const nx = dx / (dist || 1), nz = dz / (dist || 1);
+        const newX = zm.position.x + nx * ZOMBIE_SPEED * dt;
+        const newZ = zm.position.z + nz * ZOMBIE_SPEED * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null) continue;
+        if (newY - ud.groundY > ZOMBIE_STEP_HEIGHT) continue;
+        if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        zm.position.x = newX; zm.position.z = newZ;
+        setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
+      }
+    }
+
+    // ===== アイアンゴーレム (中立Mob) - 本家準拠: プレイヤーを襲わず、敵Mobを殴り倒す番人 =====
+    const golems = [];
+    const golemColliders = [];
+    const _golemColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    let golemModelTemplate = null;
+    let golemsReady = false;
+
+    const GOLEM_WIDTH = 1.4;
+    const GOLEM_HEIGHT = 2.7;
+    const GOLEM_FACING_OFFSET = 0;
+    const GOLEM_HP = 100;
+    const GOLEM_SPEED = 1.3;
+    const GOLEM_CHASE_SPEED = 2.0;
+    const GOLEM_STEP_HEIGHT = 1.2;
+    const GOLEM_SIGHT = 22;             // この距離以内の敵Mobを狩りに行く
+    const GOLEM_MELEE_RANGE = 2.4;
+    const GOLEM_MELEE_DAMAGE = 21;      // 一撃が重い (敵Mobをほぼ即死させる)
+    const GOLEM_MELEE_COOLDOWN = 1.0;
+    const GOLEM_TARGET = 1;
+    const GOLEM_SPAWN_MIN = 20;
+    const GOLEM_SPAWN_MAX = 44;
+    const GOLEM_DESPAWN_DIST = 74;
+    const GOLEM_SPAWN_INTERVAL = 10;
+    let golemSpawnTimer = 0;
+
+    function spawnGolem(x, z) {
+      if (!golemModelTemplate) return;
+      const group = cloneMobInstance(golemModelTemplate, 'golemGroup');
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(GOLEM_WIDTH, GOLEM_HEIGHT, GOLEM_WIDTH), _golemColliderMat);
+      collider.position.y = GOLEM_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.golemGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      golemColliders.push(collider);
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = GOLEM_HP;
+      group.userData.maxHp = GOLEM_HP;
+      group.userData.hitFlash = 0;
+      group.userData.meleeCd = 0;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+      group.userData.state = 'pause';
+      group.userData.stateTimer = 1 + Math.random() * 2;
+      group.userData.heading = Math.random() * Math.PI * 2;
+      group.userData.groundY = (y !== null ? y : 5);
+      group.userData.footY = group.position.y;
+      group.userData.stepHopT = 0;
+      scene.add(group);
+      golems.push(group);
+    }
+
+    function killGolem(group, drop) {
+      if (drop) dropMobLoot('golem', group.position.x, group.position.y, group.position.z);
+      scene.remove(group);
+      const idx = golems.indexOf(group);
+      if (idx !== -1) golems.splice(idx, 1);
+      const ci = golemColliders.indexOf(group.userData.collider);
+      if (ci !== -1) golemColliders.splice(ci, 1);
+    }
+
+    function hitGolem(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
+      group.userData.hitFlash = 0.5;
+      if (group.userData.hp <= 0) killGolem(group, true);
+    }
+
+    // 範囲内で最も近い敵Mob (ゾンビ/クリーパー)。居なければ null
+    function nearestHostileTo(g, range) {
+      let best = null, bestD2 = range * range;
+      for (const arr of [zombies, creepers]) {
+        for (const e of arr) {
+          const dx = e.position.x - g.position.x;
+          const dz = e.position.z - g.position.z;
+          const d2 = dx * dx + dz * dz;
+          if (d2 < bestD2) { bestD2 = d2; best = e; }
+        }
+      }
+      return best;
+    }
+
+    // 敵Mob (ゾンビ or クリーパー) に大ダメージ。倒したらドロップなしで除去
+    function golemDamageHostile(e) {
+      if (zombies.includes(e)) { hitZombie(e, GOLEM_MELEE_DAMAGE); return; }
+      if (creepers.includes(e)) {
+        e.userData.hp -= GOLEM_MELEE_DAMAGE; e.userData.hitFlash = 0.6;
+        if (e.userData.hp <= 0) killCreeper(e, false);
+      }
+    }
+
+    function trySpawnGolemNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = GOLEM_SPAWN_MIN + Math.random() * (GOLEM_SPAWN_MAX - GOLEM_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnGolem(x, z); return true; }
+      }
+      return false;
+    }
+
+    function spawnInitialGolems() {
+      golemsReady = true;
+      let guard = 0;
+      while (golems.length < GOLEM_TARGET && guard++ < 30) { if (!trySpawnGolemNearPlayer()) break; }
+    }
+
+    function manageGolems(dt) {
+      if (!golemsReady) return;
+      const D2 = GOLEM_DESPAWN_DIST * GOLEM_DESPAWN_DIST;
+      for (let i = golems.length - 1; i >= 0; i--) {
+        const g = golems[i];
+        const dx = camera.position.x - g.position.x;
+        const dz = camera.position.z - g.position.z;
+        if (dx * dx + dz * dz > D2) killGolem(g);
+      }
+      golemSpawnTimer += dt;
+      if (golemSpawnTimer >= GOLEM_SPAWN_INTERVAL) {
+        golemSpawnTimer = 0;
+        if (golems.length < GOLEM_TARGET) trySpawnGolemNearPlayer();
+      }
+    }
+
+    function updateGolems(dt) {
+      for (let i = golems.length - 1; i >= 0; i--) {
+        const g = golems[i];
+        const ud = g.userData;
+        // 溶岩ダメージ
+        if (posTouchingLava(g.position.x, g.position.y, g.position.z, GOLEM_HEIGHT)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0; ud.hp -= LAVA_DAMAGE; ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killGolem(g); continue; }
+          }
+        } else { ud.lavaTimer = LAVA_DAMAGE_INTERVAL; }
+        if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(g, ud.hitFlash); }
+
+        stepMobGroupY(g, dt, 0);  // 巨体: 跳ねず滑らかに昇降のみ
+        ud.meleeCd = Math.max(0, ud.meleeCd - dt);
+
+        // --- 敵Mob狩り: 近くの敵を見つけたら倒しに行く ---
+        const foe = nearestHostileTo(g, GOLEM_SIGHT);
+        if (foe) {
+          const fdx = foe.position.x - g.position.x;
+          const fdz = foe.position.z - g.position.z;
+          const fdist = Math.sqrt(fdx * fdx + fdz * fdz) || 0.0001;
+          g.rotation.y = Math.atan2(fdx, fdz) + GOLEM_FACING_OFFSET;
+          if (fdist < GOLEM_MELEE_RANGE) {
+            if (ud.meleeCd <= 0) {
+              ud.meleeCd = GOLEM_MELEE_COOLDOWN;
+              golemDamageHostile(foe);
+              g.scale.setScalar(1.08);
+              setTimeout(() => { if (g.parent) g.scale.setScalar(1); }, 120);
+            }
+          } else {
+            const nx = fdx / fdist, nz = fdz / fdist;
+            const newX = g.position.x + nx * GOLEM_CHASE_SPEED * dt;
+            const newZ = g.position.z + nz * GOLEM_CHASE_SPEED * dt;
+            const newY = creeperGroundY(newX, newZ);
+            if (newY !== null && newY - ud.groundY <= GOLEM_STEP_HEIGHT && waterDepthAt(newX, newZ) < MOB_DEEP_WATER) {
+              g.position.x = newX; g.position.z = newZ; setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
+            }
+          }
+          continue;
+        }
+
+        // --- 敵が居ない: のんびり徘徊 (村人風) ---
+        ud.stateTimer -= dt;
+        if (ud.state === 'pause') {
+          if (ud.stateTimer <= 0) { ud.state = 'walk'; ud.heading = Math.random() * Math.PI * 2; ud.stateTimer = 3 + Math.random() * 4; }
+          continue;
+        }
+        if (ud.state === 'walk' && ud.stateTimer <= 0) { ud.state = 'pause'; ud.stateTimer = 2 + Math.random() * 3; continue; }
+        const dirX = Math.sin(ud.heading), dirZ = Math.cos(ud.heading);
+        const newX = g.position.x + dirX * GOLEM_SPEED * dt;
+        const newZ = g.position.z + dirZ * GOLEM_SPEED * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null || newY - ud.groundY > GOLEM_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
+          ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
+          continue;
+        }
+        g.position.x = newX; g.position.z = newZ;
+        setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
+        g.rotation.y = Math.atan2(dirX, dirZ) + GOLEM_FACING_OFFSET;
+      }
+    }
+
+    // 新規Mob (魚・ゾンビ・ゴーレム) の GLB を非同期ロード → 完了後に初期スポーン
+    loadMobGLB('3D/Meshy_AI_Voxel_Rainbow_Fish_0531110500_texture.glb', FISH_HEIGHT, FISH_FACING_OFFSET, (wrapper) => {
+      fishModelTemplate = wrapper; fishesReady = true;
+      let guard = 0;
+      while (fishes.length < FISH_TARGET && guard++ < 40) { if (!trySpawnFishNearPlayer()) break; }
+    });
+    loadMobGLB('3D/Meshy_AI_Blocky_Undead_0531110455_texture.glb', ZOMBIE_HEIGHT, ZOMBIE_FACING_OFFSET, (wrapper) => {
+      zombieModelTemplate = wrapper; zombiesReady = true;
+      // 夜スタートなら初期スポーン (朝スタートなら manageZombies が夜になってから湧かす)
+      if (isNightTime()) { let guard = 0; while (zombies.length < ZOMBIE_TARGET && guard++ < 40) { if (!trySpawnZombieNearPlayer()) break; } }
+    });
+    loadMobGLB('3D/Meshy_AI_Vinebound_Golem_0531110440_texture.glb', GOLEM_HEIGHT, GOLEM_FACING_OFFSET, (wrapper) => {
+      golemModelTemplate = wrapper; spawnInitialGolems();
+    });
+
     // ===== 爆発パーティクル =====
     const explosionParticles = [];
     const _particleGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
@@ -2841,6 +3465,30 @@
           if (dmg > 0) hitWarden(w, dmg);
         }
       }
+      // 圏内のゾンビにダメージ (本家同様、爆発は全Mobを巻き込む)
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        const zm = zombies[i];
+        const d = Math.hypot(zm.position.x - cx, (zm.position.y + ZOMBIE_HEIGHT * 0.5) - cy, zm.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1) {
+          const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1)));
+          if (dmg > 0) hitZombie(zm, dmg);
+        }
+      }
+      // 圏内のアイアンゴーレムにダメージ (HPが高いので耐えることが多い)
+      for (let i = golems.length - 1; i >= 0; i--) {
+        const g = golems[i];
+        const d = Math.hypot(g.position.x - cx, (g.position.y + GOLEM_HEIGHT * 0.5) - cy, g.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1.5) {
+          const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1.5)));
+          if (dmg > 0) hitGolem(g, dmg);
+        }
+      }
+      // 圏内の魚を巻き込み撃破
+      for (let i = fishes.length - 1; i >= 0; i--) {
+        const f = fishes[i];
+        const d = Math.hypot(f.position.x - cx, f.position.y - cy, f.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1) killFish(f, true);
+      }
       // 圏内の起爆済みTNTを誘爆 (本家同様の連鎖。再帰回避のため短い導火線に再設定)
       if (typeof primedTNT !== 'undefined') {
         for (const t of primedTNT) {
@@ -2976,8 +3624,16 @@
     const PMOB_DEFS = [
       // dimX/dimZ/radius は本家準拠の当たり判定サイズ (GLB実寸では上書きしない)
       { key: 'pig',      file: '3D/Pig.glb',      height: 0.9, target: 6, speed: 1.2, hp: 10, facing: 0, template: null, dimX: 0.9, dimZ: 0.9, radius: 0.45 },
+      { key: 'cow',      file: '3D/Meshy_AI_Voxel_Cow_0531110506_texture.glb',          height: 1.4, target: 5, speed: 1.0, hp: 10, facing: 0, template: null, dimX: 0.9,  dimZ: 0.9,  radius: 0.45 },
       { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.3 },
       { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, glide: true },
+      // ウマ: 本家準拠でおとなしく徘徊 (騎乗はなし)。革をドロップ
+      { key: 'horse',    file: '3D/Meshy_AI_Pinto_Minecraft_Horse_0531110521_texture.glb', height: 1.6, target: 3, speed: 1.4, hp: 22, facing: 0, template: null, dimX: 1.2,  dimZ: 1.2,  radius: 0.6 },
+      // スティーブ / ヴァーダントマイナー: 友好的な人型NPC。村人のように徘徊し、殴ると逃げる
+      { key: 'steve',    file: '3D/Meshy_AI_Steve_with_a_Pickaxe_0531110417_texture.glb',  height: 1.9, target: 2, speed: 1.1, hp: 20, facing: 0, template: null, dimX: 0.6,  dimZ: 0.6,  radius: 0.3 },
+      { key: 'miner',    file: '3D/Meshy_AI_Verdant_Miner_0531110423_texture.glb',         height: 1.9, target: 2, speed: 1.1, hp: 20, facing: 0, template: null, dimX: 0.6,  dimZ: 0.6,  radius: 0.3 },
+      // ウサギ: 本家準拠で常にぴょんぴょん跳ねる。プレイヤーが近づくと逃げる (臆病)
+      { key: 'rabbit',   file: '3D/Meshy_AI_Voxel_Bunny_0531110514_texture.glb',           height: 0.5, target: 5, speed: 1.5, hp: 3,  facing: 0, template: null, dimX: 0.4,  dimZ: 0.4,  radius: 0.2,  hop: true },
       // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
       { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true },
     ];
@@ -3482,6 +4138,15 @@
     // ===== 時間 & 天気 =====
     const DAY_DURATION = 120;  // 秒 (2分で1日)
     let timeOfDay = 0.3;       // 朝スタート (0=深夜, 0.25=日の出, 0.5=正午, 0.75=日没)
+
+    // 太陽の高さ (0=地平線/夜, 1=正午)。日光で焼けるゾンビ・夜の湧き判定に使う
+    function daylightStrength() {
+      return Math.max(0, Math.sin((timeOfDay - 0.25) * Math.PI * 2));
+    }
+    // 夜か? (太陽が地平線下) — ゾンビの湧き判定に使う
+    function isNightTime() {
+      return daylightStrength() <= 0.02;
+    }
 
     // 時刻ごとの空の色 (lerp用キーフレーム)
     const SKY_KEYS = [
@@ -4008,9 +4673,21 @@
         manageWardens(dt);
         updateSonicBeams(dt);
 
-        // 受動Mob (ブタ・村人・チキン) の徘徊 + 個体数管理
+        // 受動Mob (ブタ・牛・村人・チキン・ウマ・スティーブ・ウサギ等) の徘徊 + 個体数管理
         updatePassiveMobs(dt);
         managePassiveMobs(dt);
+
+        // 魚 (水棲Mob): 水中を泳ぎ、陸ではピチピチ跳ねて窒息
+        updateFish(dt);
+        manageFish(dt);
+
+        // ゾンビ (敵Mob): 夜に湧き、追跡して殴る。日光で焼ける
+        updateZombies(dt);
+        manageZombies(dt);
+
+        // アイアンゴーレム (中立Mob): 徘徊しつつ敵Mobを狩る
+        updateGolems(dt);
+        manageGolems(dt);
 
         // 撃破モブが落とした素材アイテムの落下・回転・拾得
         updateItemDrops(dt);
@@ -4127,7 +4804,6 @@
     }
 
     animate();
-
 
 
 
