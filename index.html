@@ -291,8 +291,8 @@
       { name: '雪',     color: 0xF0F8FF, tex: 'textures/snow.png',     hardness: 0.2 },
       { name: 'レンガ', color: 0xA0463E, tex: 'textures/brick.png',    hardness: 1.8 },
       { name: '黒曜石', color: 0x1A0F2E, tex: 'textures/obsidian.png', hardness: 5.0 },
-      // 流体ブロック: 水は半透明(85% — 水中のブロック格子が透けないように濃いめ)、溶岩は自己発光 (触れるとダメージ)
-      { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.85, depthWrite: false, unlit: true } },
+      // 流体ブロック: 水は半透明(72%)、溶岩は自己発光 (触れるとダメージ)
+      { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.72, depthWrite: false, unlit: true } },
       { name: '溶岩',   color: 0xE2552B, tex: 'textures/lava.png', hardness: 0.1, matOpts: { emissive: 0xFF6A00, emissiveIntensity: 0.7, emissiveMap: true } },
     ];
     let selectedSlot = 0;       // ホットバー(所持品リスト)内の選択位置
