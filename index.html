@@ -1867,16 +1867,17 @@
     const passiveColliders = [];  // 各Mobの不可視ボックス (クリック判定用、レイキャスト対象)
     const _pmobColliderMat = new THREE.MeshBasicMaterial({ visible: false });
     const PMOB_DEFS = [
-      // dimX/dimZ/radius はGLBロード時に実寸から自動計算 (当たり判定に使用)
-      { key: 'pig',      file: '3D/Pig.glb',      height: 0.9, target: 6, speed: 1.2, hp: 10, facing: 0, template: null, dimX: 0.9, dimZ: 0.6, radius: 0.45 },
-      { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.35 },
-      { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.3 },
+      // dimX/dimZ/radius は本家準拠の当たり判定サイズ (GLB実寸では上書きしない)
+      { key: 'pig',      file: '3D/Pig.glb',      height: 0.9, target: 6, speed: 1.2, hp: 10, facing: 0, template: null, dimX: 0.9, dimZ: 0.9, radius: 0.45 },
+      { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.3 },
+      { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, glide: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
     const PMOB_DESPAWN_DIST = 70;     // この距離以上離れたら消す
     const PMOB_SPAWN_INTERVAL = 4;    // 補充判定の間隔 (秒)
     const PMOB_STEP_HEIGHT = 1.1;     // この高さまで登れる
+    const PMOB_GLIDE_SPEED = 2.5;     // 滑空Mob (ニワトリ) の落下速度 (ゆっくり降りる)
     const PMOB_ATTACK_DAMAGE = 4;     // 1クリックの与ダメージ
     const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
     const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
@@ -1990,6 +1991,14 @@
           setCreeperFlash(m, ud.hitFlash);  // 汎用フラッシュ (任意のGroupに適用可)
         }
 
+        // 滑空Mob (ニワトリ): 段差を降りた後はゆっくり地面まで落下 (本家のスローフォール)
+        if (def.glide) {
+          const gy = creeperGroundY(m.position.x, m.position.z);
+          if (gy !== null && m.position.y > gy + 0.02) {
+            m.position.y = Math.max(gy, m.position.y - PMOB_GLIDE_SPEED * dt);
+          }
+        }
+
         ud.stateTimer -= dt;
 
         // 停止中: タイマー切れで歩き出す
@@ -2019,13 +2028,18 @@
         const newZ = m.position.z + dirZ * speed * dt;
         const newY = creeperGroundY(newX, newZ);
         if (newY === null || newY - m.position.y > PMOB_STEP_HEIGHT) {
-          // 壁/崖: 向きを変える
+          // 壁/(滑空Mob以外は)崖: 向きを変える
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
           continue;
         }
         m.position.x = newX;
         m.position.z = newZ;
-        m.position.y = newY;
+        // 滑空Mobは登りのみ即時スナップ、下りは glide 処理でゆっくり降下させる
+        if (def.glide) {
+          if (newY > m.position.y) m.position.y = newY;
+        } else {
+          m.position.y = newY;
+        }
         m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;  // 進行方向を向く
       }
     }
@@ -2044,14 +2058,7 @@
           model.updateMatrixWorld();
           const box2 = new THREE.Box3().setFromObject(model);
           model.position.y -= box2.min.y;
-          // 実寸からコライダ寸法を算出 (クリック・体当たり判定用)
-          const size2 = box2.getSize(new THREE.Vector3());
-          if (size2.x > 0 && size2.z > 0) {
-            def.dimX = size2.x;
-            def.dimZ = size2.z;
-            def.dimY = size2.y;
-            def.radius = Math.min(0.6, Math.max(0.2, Math.max(size2.x, size2.z) / 2));
-          }
+          // コライダ寸法は PMOB_DEFS の本家準拠値を使用 (GLB実寸では上書きしない)
           const wrapper = new THREE.Group();
           wrapper.add(model);
           def.template = wrapper;
@@ -2751,6 +2758,7 @@
     }
 
     animate();
+
 
 
     // ===== リサイズ対応 =====
