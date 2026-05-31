@@ -1387,7 +1387,8 @@
     const GRAVITY = -22;
     const JUMP = 8.5;
     const STEP_HEIGHT = 1.1;   // この高さまでは自動で歩いて越える
-    const CLIMB_SPEED = 14;    // 段差を登る速さ (units/sec)
+    const STEP_SMOOTH = 11;    // 段差の上り下りのイージング係数 (大きいほど速い/小さいほどふわっと)
+    const STEP_DOWN_MAX = 1.3; // この高さまでの段差下りは自由落下せずふわっと降りる
 
     // (x,z) で「現在の足元から STEP_HEIGHT 以内で届く最も高いブロック上面 + 身長 (1.5)」
     // refY を渡すとそのカメラ高さを基準にする (省略時は現在のカメラ位置)
@@ -2608,7 +2609,7 @@
       { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.3 },
       { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, glide: true },
       // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
-      { key: 'slime',    file: '3D/スライム.glb', height: 1.0, target: 5, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.8, dimZ: 0.8, radius: 0.4, hop: true, timid: true },
+      { key: 'slime',    file: '3D/スライム.glb', height: 0.65, target: 5, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.55, dimZ: 0.55, radius: 0.28, hop: true, timid: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
@@ -2620,7 +2621,7 @@
     const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
     const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
     const SLIME_HOP_SPEED = 6;        // ぴょんぴょん跳ねる周期の速さ
-    const SLIME_HOP_HEIGHT = 0.35;    // 跳ねる見た目の高さ
+    const SLIME_HOP_HEIGHT = 0.24;    // 跳ねる見た目の高さ (小さめのスライムに合わせる)
     const SLIME_FLEE_RANGE = 7;       // この距離まで近づくと逃げ出す (臆病)
     let pmobSpawnTimer = 0;
 
@@ -3391,14 +3392,25 @@
           }
         }
 
-        // 段差を「登る」or「着地」
+        // 段差の上り下り: ふわっと滑らかに高さを合わせる (大きな落下は自由落下のまま)
+        const wasGrounded = onGround;
         const floorY = getFloorY(camera.position.x, camera.position.z);
+        const stepEase = 1 - Math.exp(-STEP_SMOOTH * dt);  // フレームレート非依存のイージング
         if (camera.position.y < floorY) {
-          // snap ではなく lerp で上がる → 段差を歩いて越える感
-          camera.position.y = Math.min(floorY, camera.position.y + CLIMB_SPEED * dt);
+          // 上り: 目標の床高へ指数イージングで持ち上げる (到着間際はふわっと減速)
+          camera.position.y += (floorY - camera.position.y) * stepEase;
+          if (floorY - camera.position.y < 0.02) camera.position.y = floorY;
           if (velocityY < 0) velocityY = 0;
-          onGround = (camera.position.y >= floorY - 0.02);
+          onGround = (floorY - camera.position.y < 0.05);
+        } else if (wasGrounded && velocityY <= 0 && floorY > -Infinity &&
+                   camera.position.y - floorY <= STEP_DOWN_MAX) {
+          // 下り(小さな段差): 自由落下せず同じイージングでふわっと降りる
+          camera.position.y += (floorY - camera.position.y) * stepEase;
+          if (camera.position.y - floorY < 0.02) camera.position.y = floorY;
+          velocityY = 0;
+          onGround = true;
         } else {
+          // 大きな落下・空中
           onGround = false;
         }
 
@@ -3581,6 +3593,7 @@
     }
 
     animate();
+
 
 
 
