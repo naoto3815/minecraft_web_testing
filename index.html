@@ -2642,6 +2642,11 @@
     const PMOB_ATTACK_DAMAGE = 4;     // 1クリックの与ダメージ
     const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
     const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
+    const PMOB_AGGRO_RANGE = 18;      // この距離以内のウォーデンを見つけたら群れで攻撃しに行く
+    const PMOB_AGGRO_SPEED_MULT = 1.5;       // ウォーデンへ突進するときの速度倍率
+    const PMOB_WARDEN_ATTACK_REACH = 0.7;    // ウォーデンに与ダメージできる追加リーチ (mob半径+ウォーデン半径 に加算)
+    const PMOB_WARDEN_ATTACK_DAMAGE = 3;     // モブ1発の対ウォーデン与ダメージ
+    const PMOB_WARDEN_ATTACK_COOLDOWN = 1.2; // モブの攻撃間隔(秒)
     const SLIME_HOP_SPEED = 6;        // ぴょんぴょん跳ねる周期の速さ
     const SLIME_HOP_HEIGHT = 0.34;    // 普段のホップの高さ
     const SLIME_STEP_HOP = 0.24;      // 段差を上り下りした瞬間に追加で跳ねる高さ
@@ -2763,6 +2768,18 @@
       }
     }
 
+    // 水平距離が range 以内で最も近いウォーデンを返す (居なければ null)
+    function nearestWardenTo(m, range) {
+      let best = null, bestD2 = range * range;
+      for (const w of wardens) {
+        const dx = w.position.x - m.position.x;
+        const dz = w.position.z - m.position.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = w; }
+      }
+      return best;
+    }
+
     function updatePassiveMobs(dt) {
       for (let i = passiveMobs.length - 1; i >= 0; i--) {
         const m = passiveMobs[i];
@@ -2837,6 +2854,56 @@
             }
           }
         }
+
+        // --- ウォーデン敵対: 近くにウォーデンを見つけたら群れで攻撃しに行く ---
+        ud.attackCd = Math.max(0, (ud.attackCd || 0) - dt);
+        if (wardens.length) {
+          const foe = nearestWardenTo(m, PMOB_AGGRO_RANGE);
+          if (foe) {
+            const fdx = foe.position.x - m.position.x;
+            const fdz = foe.position.z - m.position.z;
+            const fdist = Math.sqrt(fdx * fdx + fdz * fdz) || 0.0001;
+            const reach = (def.radius || 0.35) + WARDEN_RADIUS + PMOB_WARDEN_ATTACK_REACH;
+            ud.heading = Math.atan2(fdx, fdz);   // ウォーデンの方を向く
+            ud.state = 'aggro';
+            if (fdist <= reach) {
+              // 攻撃範囲内: 立ち止まって殴る (スライムはぴょんと飛びかかる)
+              m.rotation.y = ud.heading + def.facing;
+              if (ud.attackCd <= 0) {
+                ud.attackCd = PMOB_WARDEN_ATTACK_COOLDOWN;
+                hitWarden(foe, PMOB_WARDEN_ATTACK_DAMAGE);
+                if (def.hop) ud.stepHopT = SLIME_STEP_HOP_DUR;
+              }
+              continue;
+            }
+            // 接近: ウォーデンへ突進 (崖・深い水は避ける)
+            const aspeed = def.speed * PMOB_AGGRO_SPEED_MULT;
+            const adirX = Math.sin(ud.heading), adirZ = Math.cos(ud.heading);
+            const anx = m.position.x + adirX * aspeed * dt;
+            const anz = m.position.z + adirZ * aspeed * dt;
+            const any = creeperGroundY(anx, anz);
+            const aref = def.hop ? ud.groundY : m.position.y;
+            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER) {
+              // 進めない: 少し回り込む
+              ud.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI * 0.4;
+              continue;
+            }
+            m.position.x = anx;
+            m.position.z = anz;
+            if (def.glide) {
+              if (any > m.position.y) m.position.y = any;
+            } else if (def.hop) {
+              if (Math.abs(any - ud.groundY) > 0.1) ud.stepHopT = SLIME_STEP_HOP_DUR;
+              ud.groundY = any;
+            } else {
+              m.position.y = any;
+            }
+            m.rotation.y = Math.atan2(adirX, adirZ) + def.facing;
+            continue;
+          }
+        }
+        // ウォーデンが居なくなった: aggro を解除して通常徘徊へ戻す
+        if (ud.state === 'aggro') { ud.state = 'walk'; ud.stateTimer = 1 + Math.random() * 2; }
 
         ud.stateTimer -= dt;
 
@@ -3641,7 +3708,6 @@
     }
 
     animate();
-
 
 
 
