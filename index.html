@@ -2646,6 +2646,8 @@
     const SLIME_HOP_HEIGHT = 0.34;    // 普段のホップの高さ
     const SLIME_STEP_HOP = 0.24;      // 段差を上り下りした瞬間に追加で跳ねる高さ
     const SLIME_STEP_HOP_DUR = 0.32;  // 段差ジャンプの滞空時間(秒)
+    const SLIME_VERT_SMOOTH = 12;     // 段差の上り下りで実Yを接地高さへ寄せる速さ (大=速い)
+    const SLIME_VERT_MAX_SPEED = 15;  // 1フレームの縦移動の上限(マス/秒)。高い崖でも飛ばさず滑らかに
     let pmobSpawnTimer = 0;
 
     function countPassiveMobs(def) {
@@ -2695,6 +2697,7 @@
       group.userData.visualBaseY = visual ? visual.position.y : 0;
       group.userData.hopPhase = Math.random() * Math.PI * 2;
       group.userData.stepHopT = 0;                      // 段差ジャンプの残り時間
+      group.userData.groundY = (y !== null ? y : 5);    // 論理的な接地高さ (実Yはこれへなめらかに追従)
       group.userData.soundTimer = 3 + Math.random() * 8;  // 村人アンビエント声の初回まで
       group.rotation.y = group.userData.heading + def.facing;
       scene.add(group);
@@ -2798,6 +2801,21 @@
           ud.visual.position.y = ud.visualBaseY + h;
         }
 
+        // ホップMob (スライム): 段差の上り下りを瞬間移動でなく、実Yを接地高さへ
+        // なめらかに寄せる。これでいきなり視界から消えず、ぴょんと上り下りして見える。
+        if (def.hop) {
+          if (ud.groundY === undefined) ud.groundY = m.position.y;
+          const dyG = ud.groundY - m.position.y;
+          if (Math.abs(dyG) > 0.02) {
+            let step = dyG * (1 - Math.exp(-SLIME_VERT_SMOOTH * dt));
+            const maxStep = SLIME_VERT_MAX_SPEED * dt;   // 高い崖でも1フレームで飛ばさない
+            if (step > maxStep) step = maxStep; else if (step < -maxStep) step = -maxStep;
+            m.position.y += step;
+          } else {
+            m.position.y = ud.groundY;
+          }
+        }
+
         // 滑空Mob (ニワトリ): 段差を降りた後はゆっくり地面まで落下 (本家のスローフォール)
         if (def.glide) {
           const gy = creeperGroundY(m.position.x, m.position.z);
@@ -2848,7 +2866,9 @@
         const newX = m.position.x + dirX * speed * dt;
         const newZ = m.position.z + dirZ * speed * dt;
         const newY = creeperGroundY(newX, newZ);
-        if (newY === null || newY - m.position.y > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
+        // ホップMobはイージング中の実Yではなく論理接地高さ(groundY)で段差を判定する
+        const groundRef = def.hop ? ud.groundY : m.position.y;
+        if (newY === null || newY - groundRef > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
           // 壁/崖/深い水(溺れ防止): 向きを変える
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
           continue;
@@ -2858,9 +2878,11 @@
         // 滑空Mobは登りのみ即時スナップ、下りは glide 処理でゆっくり降下させる
         if (def.glide) {
           if (newY > m.position.y) m.position.y = newY;
+        } else if (def.hop) {
+          // ホップMob: 接地高さだけ更新し、実Yは上のイージングで追従させる(瞬間移動を避ける)
+          if (Math.abs(newY - ud.groundY) > 0.1) ud.stepHopT = SLIME_STEP_HOP_DUR;
+          ud.groundY = newY;
         } else {
-          // 段差を上り下りした瞬間に大ジャンプを発火 (ホップMobのみ)
-          if (def.hop && Math.abs(newY - m.position.y) > 0.1) ud.stepHopT = SLIME_STEP_HOP_DUR;
           m.position.y = newY;
         }
         m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;  // 進行方向を向く
