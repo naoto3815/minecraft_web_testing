@@ -3359,14 +3359,19 @@
           isOverlappingWarden(x, z, camera.position.y) ||
           isOverlappingPassiveMob(x, z, camera.position.y);
         if (isBlocked(camera.position.x, camera.position.z)) {
-          // 壁ずり: X だけ・Z だけで通れるなら片方は進ませる
-          if (!isBlocked(prevX, camera.position.z)) {
-            camera.position.x = prevX;
-          } else if (!isBlocked(camera.position.x, prevZ)) {
-            camera.position.z = prevZ;
-          } else {
-            camera.position.x = prevX;
-            camera.position.z = prevZ;
+          // 直前の位置も塞がれている = Mob に重なる・地形に埋まる等で
+          // 閉じ込められた状態。押し戻すと永久に動けなくなるので、
+          // 脱出できるよう今回の移動はそのまま通す。
+          if (!isBlocked(prevX, prevZ)) {
+            // 通常の壁衝突: X だけ・Z だけで通れるなら片方は進ませる (壁ずり)
+            if (!isBlocked(prevX, camera.position.z)) {
+              camera.position.x = prevX;
+            } else if (!isBlocked(camera.position.x, prevZ)) {
+              camera.position.z = prevZ;
+            } else {
+              camera.position.x = prevX;
+              camera.position.z = prevZ;
+            }
           }
         }
 
