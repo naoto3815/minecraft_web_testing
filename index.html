@@ -249,6 +249,7 @@
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
+    <span><span class="label">座標</span> <span id="coord-text">--, --, --</span></span>
     <span><span class="label">時刻</span> <span id="time-text">--:--</span></span>
     <span><span class="label">天気</span> <span id="weather-text">--</span></span>
   </div>
@@ -2780,6 +2781,15 @@
     const WORLD_CENTER = GROUND / 2;
     const _rainSkyTint = new THREE.Color(0x5a6068);
     const timeTextEl = document.getElementById('time-text');
+    const coordTextEl = document.getElementById('coord-text');
+
+    // プレイヤーの足元ブロック座標を HUD に表示 (視点は足元 +1.5)
+    function updateCoordHUD() {
+      const cx = Math.round(camera.position.x);
+      const cy = Math.round(camera.position.y - 1.5);
+      const cz = Math.round(camera.position.z);
+      coordTextEl.textContent = `${cx}, ${cy}, ${cz}`;
+    }
 
     function updateTimeOfDay(dt) {
       timeOfDay = (timeOfDay + dt / DAY_DURATION) % 1;
@@ -3319,6 +3329,7 @@
       // 時間と天気はポーズ中も進行
       updateTimeOfDay(dt);
       updateWeather(dt);
+      updateCoordHUD();
 
       // 被弾シェイク: cameraPivot を揺らして "殴られた" 感を演出
       if (shakeIntensity > 0) {
