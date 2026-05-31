@@ -2609,7 +2609,7 @@
       { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.3 },
       { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, glide: true },
       // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
-      { key: 'slime',    file: '3D/スライム.glb', height: 0.65, target: 5, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.55, dimZ: 0.55, radius: 0.28, hop: true, timid: true },
+      { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 5, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
@@ -2621,8 +2621,9 @@
     const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
     const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
     const SLIME_HOP_SPEED = 6;        // ぴょんぴょん跳ねる周期の速さ
-    const SLIME_HOP_HEIGHT = 0.24;    // 跳ねる見た目の高さ (小さめのスライムに合わせる)
-    const SLIME_FLEE_RANGE = 7;       // この距離まで近づくと逃げ出す (臆病)
+    const SLIME_HOP_HEIGHT = 0.34;    // 普段のホップの高さ
+    const SLIME_STEP_HOP = 0.24;      // 段差を上り下りした瞬間に追加で跳ねる高さ
+    const SLIME_STEP_HOP_DUR = 0.32;  // 段差ジャンプの滞空時間(秒)
     let pmobSpawnTimer = 0;
 
     function countPassiveMobs(def) {
@@ -2671,6 +2672,7 @@
       group.userData.visual = visual;                   // ホップ対象 (モデル本体)
       group.userData.visualBaseY = visual ? visual.position.y : 0;
       group.userData.hopPhase = Math.random() * Math.PI * 2;
+      group.userData.stepHopT = 0;                      // 段差ジャンプの残り時間
       group.userData.soundTimer = 3 + Math.random() * 8;  // 村人アンビエント声の初回まで
       group.rotation.y = group.userData.heading + def.facing;
       scene.add(group);
@@ -2764,7 +2766,14 @@
         // ホップ表示 (スライム等): モデル本体だけを上下させる (足元位置はそのまま)
         if (def.hop && ud.visual) {
           ud.hopPhase += dt * SLIME_HOP_SPEED;
-          ud.visual.position.y = ud.visualBaseY + Math.abs(Math.sin(ud.hopPhase)) * SLIME_HOP_HEIGHT;
+          // 跳んで→着地して少し止まる、を繰り返す (max(0,sin) で休符付きの小ホップ)
+          let h = Math.max(0, Math.sin(ud.hopPhase)) * SLIME_HOP_HEIGHT;
+          // 段差を上り下りした直後は大きくぴょんと跳ねる (0→ピーク→0 のなめらかな弧)
+          if (ud.stepHopT > 0) {
+            ud.stepHopT = Math.max(0, ud.stepHopT - dt);
+            h += Math.sin(Math.PI * (1 - ud.stepHopT / SLIME_STEP_HOP_DUR)) * SLIME_STEP_HOP;
+          }
+          ud.visual.position.y = ud.visualBaseY + h;
         }
 
         // 滑空Mob (ニワトリ): 段差を降りた後はゆっくり地面まで落下 (本家のスローフォール)
@@ -2786,18 +2795,6 @@
               const adz = camera.position.z - m.position.z;
               playVillagerSound('ambient', Math.sqrt(adx * adx + ady * ady + adz * adz));
             }
-          }
-        }
-
-        // 臆病Mob (スライム): プレイヤーが近づくと逃げ出す
-        if (def.timid) {
-          const pdx = m.position.x - camera.position.x;
-          const pdz = m.position.z - camera.position.z;
-          const pd = Math.sqrt(pdx * pdx + pdz * pdz);
-          if (pd < SLIME_FLEE_RANGE && pd > 0.001) {
-            ud.heading = Math.atan2(pdx, pdz);  // プレイヤーと反対方向
-            ud.state = 'flee';
-            ud.fleeTimer = PMOB_FLEE_DURATION;
           }
         }
 
@@ -2840,6 +2837,8 @@
         if (def.glide) {
           if (newY > m.position.y) m.position.y = newY;
         } else {
+          // 段差を上り下りした瞬間に大ジャンプを発火 (ホップMobのみ)
+          if (def.hop && Math.abs(newY - m.position.y) > 0.1) ud.stepHopT = SLIME_STEP_HOP_DUR;
           m.position.y = newY;
         }
         m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;  // 進行方向を向く
