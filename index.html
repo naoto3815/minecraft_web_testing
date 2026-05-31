@@ -1027,6 +1027,14 @@
       return e ? e.has(key(x, y, z)) : false;
     }
 
+    // (x,y,z) がいまプレイヤーの体に重なる位置か? (立っている床は除外)
+    // 非同期生成中に足元へ固体ブロックを置いて埋めてしまうのを防ぐ
+    function isPlayerVoxel(x, y, z) {
+      if (Math.round(camera.position.x) !== x || Math.round(camera.position.z) !== z) return false;
+      const feetY = camera.position.y - 1.5;
+      return (y - 0.5) < camera.position.y - 0.05 && (y + 0.5) > feetY + 0.05;
+    }
+
     // 1列の地中(石・洞窟・溶岩・岩盤)を生成。地表 generateColumn が h-3,h-4 まで石を
     // 置いているので、その下 (h-5) から最下層 BEDROCK_Y まで掘り下げる。
     // 改変済み(掘った/置いた)座標は地表 generateColumn が処理済みなので触らない。
@@ -1038,6 +1046,7 @@
       const keys = [];
       for (let y = h - 5; y >= BEDROCK_Y; y--) {
         if (hasEdit(cx, cz, cx, y, cz)) continue;  // 改変済みは地表側が管理
+        if (isPlayerVoxel(cx, y, cz)) continue;    // プレイヤーが今いる位置は空けておく (嵌り防止)
         if (y === BEDROCK_Y) {                     // 最下層は黒曜石で封をする
           if (addBlock(cx, y, cz, OBSIDIAN_INDEX)) keys.push(key(cx, y, cz));
           continue;
@@ -1467,6 +1476,20 @@
         }
       }
       return false;
+    }
+
+    // 体が固体ブロックに埋まったら(窒息・嵌り)、直上の空きスペースまで押し上げて救出する。
+    // 地形の非同期生成などで万一プレイヤーがブロックに閉じ込められても抜け出せるようにする安全網。
+    function unstickPlayer() {
+      // 体が今いる列のブロックと重なっていなければ何もしない
+      if (!hasCeiling(camera.position.x, camera.position.z, camera.position.y)) return;
+      let guard = 0;
+      // 体が抜ける高さまで 1 ブロックずつ持ち上げる (最初の空洞 or 地表で止まる)
+      while (hasCeiling(camera.position.x, camera.position.z, camera.position.y) && guard++ < 256) {
+        camera.position.y += 1;
+      }
+      velocityY = 0;
+      fallStartY = null;  // 救出による落下ダメージは無効化
     }
 
     addEventListener('keydown', (e) => {
@@ -3430,6 +3453,9 @@
 
         // 無限地形ストリーミング: 周囲を生成・遠方を破棄
         updateStreaming();
+
+        // 生成直後にブロックへ埋まっていたら救出 (嵌り防止の安全網)
+        unstickPlayer();
 
         // 水面メッシュの再構築 (このフレームで水/隣接ブロックが変化した時のみ)
         if (waterDirty) { rebuildWaterMesh(); waterDirty = false; }
