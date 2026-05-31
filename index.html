@@ -22,6 +22,18 @@
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       color: white; font-size: 22px; pointer-events: none; text-shadow: 0 0 3px black;
     }
+    /* 素材を拾ったときのトースト (画面下中央に積み上がり数秒で消える) */
+    #pickup-toast {
+      position: absolute; bottom: 96px; left: 50%; transform: translateX(-50%);
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      pointer-events: none; z-index: 5;
+    }
+    #pickup-toast .pickup-line {
+      background: rgba(0, 0, 0, 0.6); color: #ffe57a; font-size: 15px; font-weight: bold;
+      padding: 4px 12px; border-radius: 12px; transition: opacity 0.6s ease;
+      text-shadow: 0 0 3px black;
+    }
+    #pickup-toast .pickup-line.fade { opacity: 0; }
     #startmsg {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: rgba(0, 0, 0, 0.85); color: white; padding: 28px 36px;
@@ -445,17 +457,54 @@
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
     const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
 
+    // ===== 素材アイテム (モブ撃破で手に入る。ブロックとは別管理) =====
+    // food を持つ素材は選択して右クリックで食べると HP 回復。
+    const MATERIAL_DEFS = [
+      { id: 'porkchop',  name: '生豚肉',         color: 0xE8907E, label: '豚', food: 4 },
+      { id: 'chicken',   name: '生の鶏肉',       color: 0xE7B98A, label: '鶏', food: 2 },
+      { id: 'feather',   name: '羽根',           color: 0xF2F2F2, label: '羽' },
+      { id: 'slimeball', name: 'スライムボール', color: 0x77C043, label: 'ス' },
+      { id: 'gunpowder', name: '火薬',           color: 0x6B6B6B, label: '火' },
+      { id: 'emerald',   name: 'エメラルド',     color: 0x2ECC71, label: '緑' },
+      { id: 'echoshard', name: 'エコーシャード', color: 0x2BD1C4, label: '響' },
+    ];
+    function matIcon(m) {
+      const hex = '#' + m.color.toString(16).padStart(6, '0');
+      const dark = '#1a1a1a';
+      return svgDataURI(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" +
+        `<rect x='3' y='3' width='18' height='18' rx='3.5' fill='${hex}' stroke='${dark}' stroke-width='1.4'/>` +
+        `<text x='12' y='16.5' font-size='11' font-family='sans-serif' font-weight='bold' fill='${dark}' text-anchor='middle'>${m.label}</text>` +
+        "</svg>"
+      );
+    }
+    const materialById = {};
+    const materials = {};
+    MATERIAL_DEFS.forEach((m) => { m.icon = matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
+
+    // モブ別ドロップ表 (min..max 個を一様乱数で。0 を含むものは出ないこともある)
+    const MOB_DROPS = {
+      pig:      [{ id: 'porkchop',  min: 1, max: 3 }],
+      chicken:  [{ id: 'chicken',   min: 1, max: 1 }, { id: 'feather', min: 0, max: 2 }],
+      slime:    [{ id: 'slimeball', min: 1, max: 2 }],
+      villager: [{ id: 'emerald',   min: 0, max: 1 }],
+      creeper:  [{ id: 'gunpowder', min: 0, max: 2 }],
+      warden:   [{ id: 'echoshard', min: 1, max: 1 }],
+    };
+
     // ===== ホットバー: 所持しているブロック + 作成した道具のみ表示 =====
     let hotbarItems = [];   // { kind:'block', i } | { kind:'tool', id } | { kind:'tnt' }
     function itemKey(it) {
       if (it.kind === 'block') return 'b' + it.i;
       if (it.kind === 'tool') return 't' + it.id;
+      if (it.kind === 'material') return 'm' + it.id;
       return 'tnt';
     }
     function computeHotbarItems() {
       const items = [];
       if (tntCount > 0) items.push({ kind: 'tnt' });  // 先頭に固定 (デフォルト所持)
       blockTypes.forEach((b, i) => { if (inventory[i] > 0) items.push({ kind: 'block', i }); });
+      MATERIAL_DEFS.forEach((m) => { if (materials[m.id] > 0) items.push({ kind: 'material', id: m.id }); });
       TOOL_DEFS.forEach((t) => { if (ownedTools[t.id]) items.push({ kind: 'tool', id: t.id }); });
       return items;
     }
@@ -480,6 +529,9 @@
           img.alt = bt.name;
         } else if (it.kind === 'tnt') {
           img.src = TNT_ICON; img.alt = 'TNT';
+        } else if (it.kind === 'material') {
+          const m = materialById[it.id];
+          img.src = m.icon; img.alt = m.name;
         } else {
           const t = toolById[it.id];
           img.src = t.icon; img.alt = t.name;
@@ -507,6 +559,7 @@
         const it = hotbarItems[idx];
         if (!it) return;
         els.count.textContent = it.kind === 'block' ? (inventory[it.i] > 0 ? inventory[it.i] : '')
+                              : it.kind === 'material' ? materials[it.id]
                               : (it.kind === 'tnt' ? tntCount : '');
         els.slot.classList.toggle('selected', idx === selectedSlot);
       });
@@ -539,13 +592,31 @@
       return true;
     }
 
+    // 素材から作るレシピ (道具以外。コストはブロック/素材の混在可・何度でも作れる)
+    const ITEM_RECIPES = [
+      { id: 'tnt', name: 'TNT', icon: TNT_ICON,
+        costs: [{ kind: 'material', id: 'gunpowder', qty: 2 }, { kind: 'block', i: blockIndexByName['砂'], qty: 3 }],
+        make() { tntCount += 1; } },
+    ];
+    function recipeCostOwned(c) { return c.kind === 'material' ? materials[c.id] : inventory[c.i]; }
+    function recipeCostName(c)  { return c.kind === 'material' ? materialById[c.id].name : blockTypes[c.i].name; }
+    function canCraftItem(r) { return r.costs.every((c) => recipeCostOwned(c) >= c.qty); }
+    function craftItem(r) {
+      if (!canCraftItem(r)) return false;
+      for (const c of r.costs) { if (c.kind === 'material') materials[c.id] -= c.qty; else inventory[c.i] -= c.qty; }
+      r.make();
+      updateHotbar();
+      refreshCraftPanel();
+      return true;
+    }
+
     // クラフトUI (パネル + ボタンを動的生成)
     const craftPanelEl = document.createElement('div');
     craftPanelEl.id = 'craftpanel';
     craftPanelEl.innerHTML =
       '<div class="panel"><button id="craftclose">×</button>' +
       '<h2>クラフト</h2>' +
-      '<div class="hint">材料を消費して道具を作成。E キーで開閉。道具を選ぶと対応ブロックの採掘が速くなり、剣は攻撃力UP。</div>' +
+      '<div class="hint">材料を消費して道具やTNTを作成。E キーで開閉。道具を選ぶと対応ブロックの採掘が速くなり、剣は攻撃力UP。モブを倒すと素材が手に入り、肉系は選んで右クリックで食べてHP回復。</div>' +
       '<div class="grid" id="craftgrid"></div></div>';
     document.body.appendChild(craftPanelEl);
     const craftGridEl = craftPanelEl.querySelector('#craftgrid');
@@ -577,6 +648,19 @@
         const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
         card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
         if (!owned && ok) card.addEventListener('click', () => craftTool(t));
+        craftGridEl.appendChild(card);
+      });
+      // 素材レシピ (TNTなど。何度でも作れる)
+      ITEM_RECIPES.forEach((r) => {
+        const ok = canCraftItem(r);
+        const card = document.createElement('div');
+        card.className = 'recipe' + (ok ? '' : ' locked');
+        const costLine = r.costs.map((c) => `${recipeCostName(c)} × ${c.qty}（所持 ${recipeCostOwned(c)}）`).join(' + ');
+        const img = document.createElement('img'); img.src = r.icon; img.alt = r.name;
+        const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = r.name;
+        const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (ok) card.addEventListener('click', () => craftItem(r));
         craftGridEl.appendChild(card);
       });
     }
@@ -1683,7 +1767,11 @@
 
     function updateBlockInfo() {
       const it = selectedItem();
-      const name = !it ? 'なし' : (it.kind === 'block' ? blockTypes[it.i].name : toolById[it.id].name);
+      const name = !it ? 'なし'
+        : it.kind === 'block' ? blockTypes[it.i].name
+        : it.kind === 'tnt' ? 'TNT'
+        : it.kind === 'material' ? materialById[it.id].name
+        : toolById[it.id].name;
       document.getElementById('blockinfo').textContent = `選択中: ${name}`;
     }
 
@@ -1701,6 +1789,8 @@
 
     addEventListener('mousedown', (e) => {
       if (!controls.isLocked || craftingOpen) return;
+      // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
+      if (e.button === 2 && tryEatSelected()) return;
       raycaster.setFromCamera(centerScreen, camera);
       // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
@@ -1734,7 +1824,7 @@
           let g = hit.object;
           while (g && !creepers.includes(g)) g = g.parent;
           if (g) {
-            killCreeper(g);
+            killCreeper(g, true);  // プレイヤー撃破: 火薬をドロップ
             startHandSwing();
           }
         }
@@ -1978,7 +2068,8 @@
       c.userData.hissGain = null;
     }
 
-    function killCreeper(group) {
+    function killCreeper(group, drop) {
+      if (drop) dropMobLoot('creeper', group.position.x, group.position.y, group.position.z);
       stopCreeperHiss(group);  // 撃破時もシュー音停止
       scene.remove(group);
       const idx = creepers.indexOf(group);
@@ -2156,7 +2247,8 @@
       wardens.push(group);
     }
 
-    function killWarden(group) {
+    function killWarden(group, drop) {
+      if (drop) dropMobLoot('warden', group.position.x, group.position.y, group.position.z);
       scene.remove(group);
       const idx = wardens.indexOf(group);
       if (idx !== -1) wardens.splice(idx, 1);
@@ -2176,7 +2268,7 @@
       group.userData.hp -= (damage || 4);
       group.userData.hitFlash = 0.5;
       const d = _wardenDist(group);
-      if (group.userData.hp <= 0) { playWardenSound('death', d); killWarden(group); }
+      if (group.userData.hp <= 0) { playWardenSound('death', d); killWarden(group, true); }
       else playWardenSound('hurt', d);
     }
 
@@ -2868,7 +2960,8 @@
       passiveMobs.push(group);
     }
 
-    function killPassiveMob(group) {
+    function killPassiveMob(group, drop) {
+      if (drop) dropMobLoot(group.userData.def.key, group.position.x, group.position.y, group.position.z);
       scene.remove(group);
       const idx = passiveMobs.indexOf(group);
       if (idx !== -1) passiveMobs.splice(idx, 1);
@@ -2888,13 +2981,85 @@
         const sd = Math.sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
         playVillagerSound(group.userData.hp <= 0 ? 'death' : 'hurt', sd);
       }
-      if (group.userData.hp <= 0) { killPassiveMob(group); return; }
+      if (group.userData.hp <= 0) { killPassiveMob(group, true); return; }  // 撃破: 素材をドロップ
       // プレイヤーと反対方向へ逃げる
       const dx = group.position.x - camera.position.x;
       const dz = group.position.z - camera.position.z;
       group.userData.heading = Math.atan2(dx, dz);
       group.userData.state = 'flee';
       group.userData.fleeTimer = PMOB_FLEE_DURATION;
+    }
+
+    // ===== ドロップアイテム (撃破したモブが落とす素材。近づくと自動で拾う) =====
+    const itemDrops = [];
+    const ITEM_DROP_LIFETIME = 120;   // 秒で自然消滅
+    const ITEM_PICKUP_RANGE = 1.4;    // この距離まで近づくと拾う
+    const ITEM_DROP_GRAVITY = 18;
+    const _dropGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+    const _dropMatCache = {};
+    function dropMatMesh(id) {
+      if (!_dropMatCache[id]) {
+        const m = materialById[id];
+        _dropMatCache[id] = new THREE.MeshLambertMaterial({ color: m.color, emissive: m.color, emissiveIntensity: 0.3 });
+      }
+      return _dropMatCache[id];
+    }
+    function spawnItemDrop(x, y, z, id, qty) {
+      if (qty <= 0 || !materialById[id]) return;
+      const mesh = new THREE.Mesh(_dropGeo, dropMatMesh(id));
+      mesh.position.set(x + (Math.random() - 0.5) * 0.4, y + 0.4, z + (Math.random() - 0.5) * 0.4);
+      mesh.userData = { id, qty, vy: 2 + Math.random() * 1.5, bob: Math.random() * Math.PI * 2, age: 0 };
+      scene.add(mesh);
+      itemDrops.push(mesh);
+    }
+    // ドロップ表を振って、撃破地点にアイテムを落とす
+    function dropMobLoot(mobKey, x, y, z) {
+      const table = MOB_DROPS[mobKey];
+      if (!table) return;
+      for (const d of table) {
+        const qty = d.min + Math.floor(Math.random() * (d.max - d.min + 1));
+        if (qty > 0) spawnItemDrop(x, y, z, d.id, qty);
+      }
+    }
+    function updateItemDrops(dt) {
+      const px = camera.position.x, py = camera.position.y, pz = camera.position.z;
+      for (let i = itemDrops.length - 1; i >= 0; i--) {
+        const it = itemDrops[i], ud = it.userData;
+        ud.age += dt;
+        // 重力で落下し、床の上で止まる
+        ud.vy -= ITEM_DROP_GRAVITY * dt;
+        let ny = it.position.y + ud.vy * dt;
+        const gy = creeperGroundY(it.position.x, it.position.z);
+        const restY = (gy !== null ? gy : BEDROCK_Y) + 0.15;
+        if (ny <= restY) { ny = restY; ud.vy = 0; }
+        // 見栄え: 回転 + 接地時の上下ゆらぎ
+        it.rotation.y += dt * 2.2;
+        ud.bob += dt * 3;
+        it.position.y = (ud.vy === 0) ? ny + Math.sin(ud.bob) * 0.07 : ny;
+        // 拾う (プレイヤーの体に近づいたら)
+        const dx = px - it.position.x, dy = (py - 0.75) - it.position.y, dz = pz - it.position.z;
+        if (dx * dx + dy * dy + dz * dz < ITEM_PICKUP_RANGE * ITEM_PICKUP_RANGE) {
+          materials[ud.id] += ud.qty;
+          updateHotbar();
+          showPickupToast(ud.id, ud.qty);
+          scene.remove(it); itemDrops.splice(i, 1);
+          continue;
+        }
+        if (ud.age > ITEM_DROP_LIFETIME) { scene.remove(it); itemDrops.splice(i, 1); }
+      }
+    }
+    // 拾得トースト (画面下にスタックして数秒でフェード)
+    const pickupToastEl = document.createElement('div');
+    pickupToastEl.id = 'pickup-toast';
+    document.body.appendChild(pickupToastEl);
+    function showPickupToast(id, qty) {
+      const m = materialById[id];
+      const line = document.createElement('div');
+      line.className = 'pickup-line';
+      line.textContent = `+${qty} ${m.name}`;
+      pickupToastEl.appendChild(line);
+      setTimeout(() => line.classList.add('fade'), 1400);
+      setTimeout(() => line.remove(), 2000);
     }
 
     function trySpawnPassiveMobNearPlayer(def) {
@@ -3434,6 +3599,27 @@
       breathFillEl.style.width = `${remain * 100}%`;
     }
 
+    // 食料を食べたときの HP 回復 (上限 PLAYER_MAX_HP)
+    function healPlayer(amount) {
+      if (playerHP <= 0 || playerHP >= PLAYER_MAX_HP) return false;
+      playerHP = Math.min(PLAYER_MAX_HP, playerHP + amount);
+      updateHPDisplay();
+      return true;
+    }
+
+    // 選択中アイテムが食料素材なら 1 個食べて HP 回復。食べたら true (HP満タン時は消費しない)。
+    function tryEatSelected() {
+      const sel = selectedItem();
+      if (!sel || sel.kind !== 'material') return false;
+      const m = materialById[sel.id];
+      if (!m.food || materials[sel.id] <= 0) return false;
+      if (!healPlayer(m.food)) return false;
+      materials[sel.id]--;
+      updateHotbar();
+      startHandSwing();
+      return true;
+    }
+
     function damagePlayer(amount, ignoreInvuln = false) {
       if (playerHP <= 0) return;
       const now = clock.getElapsedTime();
@@ -3580,6 +3766,7 @@
         e.preventDefault();
         e.stopPropagation();
         if (!controls.isLocked || craftingOpen) return;
+        if (tryEatSelected()) return;  // 食料を選択中なら食べる
         const it = selectedItem();
         if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
         const bi = it.i;
@@ -3760,6 +3947,9 @@
         updatePassiveMobs(dt);
         managePassiveMobs(dt);
 
+        // 撃破モブが落とした素材アイテムの落下・回転・拾得
+        updateItemDrops(dt);
+
         // 起爆中TNTの導火線進行 + 爆発
         updatePrimedTNT(dt);
 
@@ -3872,6 +4062,9 @@
     }
 
     animate();
+
+
+
 
 
     // ===== リサイズ対応 =====
