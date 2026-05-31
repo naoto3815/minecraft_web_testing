@@ -720,6 +720,57 @@
       instancePositions.push([]);
     });
 
+    // ===== 水: 隣接面をカリングした単一メッシュで「つながった」見た目にする =====
+    // 水ブロックの InstancedMesh はデータ/レイキャスト/破壊設置用に残したまま非表示化し、
+    // 空気に面した面だけを集めた1枚のメッシュを別に描画する (本家同様、水同士の境界線が消える)。
+    instancedMeshes[WATER_INDEX].visible = false;
+    const waterBlocks = new Set();   // 水ブロックのキー集合
+    let waterDirty = false;          // 再構築が必要か
+    const waterGeo = new THREE.BufferGeometry();
+    const waterVisualMesh = new THREE.Mesh(waterGeo, instancedMeshes[WATER_INDEX].material);
+    waterVisualMesh.material.side = THREE.DoubleSide;  // 水中からも面が見える
+    waterVisualMesh.frustumCulled = false;
+    waterVisualMesh.raycast = () => {};                // 当たり判定は不可視InstancedMesh側で実施
+    scene.add(waterVisualMesh);
+
+    // 単位立方体 (中心0, 各辺±0.5) の6面。各 q は四隅 v0..v3
+    const WATER_FACES = [
+      { d: [ 1, 0, 0], q: [ .5,-.5,-.5,  .5, .5,-.5,  .5, .5, .5,  .5,-.5, .5] }, // +X
+      { d: [-1, 0, 0], q: [-.5,-.5, .5, -.5, .5, .5, -.5, .5,-.5, -.5,-.5,-.5] }, // -X
+      { d: [ 0, 1, 0], q: [-.5, .5,-.5, -.5, .5, .5,  .5, .5, .5,  .5, .5,-.5] }, // +Y (上面)
+      { d: [ 0,-1, 0], q: [-.5,-.5, .5, -.5,-.5,-.5,  .5,-.5,-.5,  .5,-.5, .5] }, // -Y
+      { d: [ 0, 0, 1], q: [ .5,-.5, .5,  .5, .5, .5, -.5, .5, .5, -.5,-.5, .5] }, // +Z
+      { d: [ 0, 0,-1], q: [-.5,-.5,-.5, -.5, .5,-.5,  .5, .5,-.5,  .5,-.5,-.5] }, // -Z
+    ];
+
+    // (x,y,z) の隣6マスのいずれかが水か? (固体ブロック変更時の再構築要否判定に使う)
+    function touchesWater(x, y, z) {
+      return waterBlocks.has(key(x + 1, y, z)) || waterBlocks.has(key(x - 1, y, z)) ||
+             waterBlocks.has(key(x, y + 1, z)) || waterBlocks.has(key(x, y - 1, z)) ||
+             waterBlocks.has(key(x, y, z + 1)) || waterBlocks.has(key(x, y, z - 1));
+    }
+
+    // 空気に面した水面だけを集めて1枚のジオメトリに再構築 (水同士・固体に接する面はカリング)
+    function rebuildWaterMesh() {
+      const verts = [];
+      for (const k of waterBlocks) {
+        if (!blocks.has(k)) continue;
+        const ci = k.indexOf(','), cj = k.indexOf(',', ci + 1);
+        const x = +k.slice(0, ci), y = +k.slice(ci + 1, cj), z = +k.slice(cj + 1);
+        for (const f of WATER_FACES) {
+          // 隣に何かあれば面を出さない: 水同士=つながって見える / 固体=どのみち隠れる
+          if (blocks.has(key(x + f.d[0], y + f.d[1], z + f.d[2]))) continue;
+          const q = f.q;
+          // 四角形 = 2三角形 (v0,v1,v2)+(v0,v2,v3)。unlit単色なので位置のみで十分
+          for (const vi of [0, 1, 2, 0, 2, 3]) {
+            verts.push(x + q[vi * 3], y + q[vi * 3 + 1], z + q[vi * 3 + 2]);
+          }
+        }
+      }
+      waterGeo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+      waterGeo.setDrawRange(0, verts.length / 3);
+    }
+
     function addBlock(x, y, z, typeIndex) {
       const k = key(x, y, z);
       if (blocks.has(k)) return false;
@@ -736,6 +787,8 @@
       im.instanceMatrix.needsUpdate = true;
       positions[id] = k;
       blocks.set(k, { typeIndex, instanceId: id });
+      if (typeIndex === WATER_INDEX) { waterBlocks.add(k); waterDirty = true; }
+      else if (touchesWater(x, y, z)) { waterDirty = true; }  // 水に隣接 → 水面が隠れる
       return true;
     }
 
@@ -760,6 +813,8 @@
       im.count = lastId;
       im.instanceMatrix.needsUpdate = true;
       blocks.delete(k);
+      if (entry.typeIndex === WATER_INDEX) { waterBlocks.delete(k); waterDirty = true; }
+      else if (touchesWater(x, y, z)) { waterDirty = true; }  // 水に隣接 → 水面が露出
     }
 
     // ヘルパー: InstancedMesh の hit から (x, y, z) を取り出す
@@ -2725,6 +2780,9 @@
         // 無限地形ストリーミング: 周囲を生成・遠方を破棄
         updateStreaming();
 
+        // 水面メッシュの再構築 (このフレームで水/隣接ブロックが変化した時のみ)
+        if (waterDirty) { rebuildWaterMesh(); waterDirty = false; }
+
         // 敵Mob (クリーパー) の更新 + 個体数管理 (周囲に湧かせ遠方を消す)
         updateCreepers(dt);
         manageCreepers(dt);
@@ -2840,6 +2898,7 @@
     }
 
     animate();
+
 
 
 
