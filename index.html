@@ -1661,6 +1661,34 @@
       return null;
     }
 
+    // ===== Mob 共通: 環境ダメージ/危険地形の判定 =====
+    // 足元 footY・高さ height の胴体セルに溶岩が重なっているか? (全Mob共通の溶岩判定)
+    function posTouchingLava(x, footY, z, height) {
+      const px = Math.round(x), pz = Math.round(z);
+      const loY = Math.round(footY);
+      const hiY = Math.round(footY + (height || 1));
+      for (let yy = loY; yy <= hiY; yy++) {
+        const e = blocks.get(key(px, yy, pz));
+        if (e && e.typeIndex === LAVA_INDEX) return true;
+      }
+      return false;
+    }
+
+    // (x,z) の地面の上に水が何ブロック積もっているか — Mob が深い水を避けて溺れないために使う
+    function waterDepthAt(x, z) {
+      const px = Math.round(x), pz = Math.round(z);
+      const gy = creeperGroundY(px, pz);  // 固体の上面 (= solidY + 0.5)
+      if (gy === null) return 0;
+      let depth = 0;
+      let yy = Math.round(gy + 0.5);       // 固体の1つ上のセルから上へ
+      while (depth < 8) {
+        const e = blocks.get(key(px, yy, pz));
+        if (e && e.typeIndex === WATER_INDEX) { depth++; yy++; } else break;
+      }
+      return depth;
+    }
+    const MOB_DEEP_WATER = 2;  // この深さ以上の水は Mob が避ける (浅瀬の歩行は許容)
+
     const CREEPER_RADIUS = 0.4;  // クリーパーの当たり判定半径
 
     // プレイヤー位置がいずれかのクリーパーと重なるか? (AABB簡易判定)
@@ -1720,6 +1748,9 @@
       });
       const y = creeperGroundY(x, z);
       group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = CREEPER_HP;        // 環境ダメージ(溶岩)用のHP。プレイヤーの攻撃は即死のまま
+      group.userData.hitFlash = 0;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
       scene.add(group);
       creepers.push(group);
     }
@@ -1824,6 +1855,8 @@
     const CREEPER_SPEED = 1.5;
     const CREEPER_SIGHT = 25;         // この距離以内なら追ってくる
     const CREEPER_STEP_HEIGHT = 1.1;  // この高さまで登れる
+    const CREEPER_BODY_HEIGHT = 1.8;  // 溶岩判定に使う胴体の高さ (GLB正規化値)
+    const CREEPER_HP = 6;             // 溶岩など環境ダメージ用 (約1.5秒で焼死)
     const FUSE_RANGE = 3.0;           // この距離内で導火線開始
     const FUSE_DURATION = 1.5;        // 起爆までの秒数
     const FUSE_CANCEL_RANGE = 5.0;    // この距離以上離れると起爆キャンセル
@@ -1846,7 +1879,7 @@
         const dist = CREEPER_SPAWN_MIN + Math.random() * (CREEPER_SPAWN_MAX - CREEPER_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null) { spawnCreeper(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnCreeper(x, z); return true; }
       }
       return false;
     }
@@ -1948,6 +1981,7 @@
       group.userData.sonicCd = WARDEN_SONIC_COOLDOWN * (0.5 + Math.random());
       group.userData.sonicCharge = 0;   // >0 のときチャージ中(動けない)
       group.userData.heartTimer = 0;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
       scene.add(group);
       wardens.push(group);
     }
@@ -1982,7 +2016,7 @@
         const dist = WARDEN_SPAWN_MIN + Math.random() * (WARDEN_SPAWN_MAX - WARDEN_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null) { spawnWarden(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnWarden(x, z); return true; }
       }
       return false;
     }
@@ -2069,6 +2103,18 @@
       for (let i = wardens.length - 1; i >= 0; i--) {
         const w = wardens[i];
         const ud = w.userData;
+        // 溶岩ダメージ (全Mob共通)
+        if (posTouchingLava(w.position.x, w.position.y, w.position.z, WARDEN_HEIGHT)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0;
+            ud.hp -= LAVA_DAMAGE;
+            ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killWarden(w); continue; }
+          }
+        } else {
+          ud.lavaTimer = LAVA_DAMAGE_INTERVAL;
+        }
         // 被弾フラッシュの減衰
         if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(w, ud.hitFlash); }
 
@@ -2134,6 +2180,7 @@
         const newY = creeperGroundY(newX, newZ);
         if (newY === null) continue;
         if (newY - w.position.y > WARDEN_STEP_HEIGHT) continue;
+        if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;  // 深い水は避ける (溺れ防止)
         w.position.x = newX;
         w.position.z = newZ;
         w.position.y = newY;
@@ -2458,6 +2505,25 @@
       // 爆発で splice するので逆順ループ
       for (let i = creepers.length - 1; i >= 0; i--) {
         const c = creepers[i];
+
+        // 溶岩ダメージ (全Mob共通): 溶岩に触れている間、一定間隔でHPを削り焼死させる
+        if (posTouchingLava(c.position.x, c.position.y, c.position.z, CREEPER_BODY_HEIGHT)) {
+          c.userData.lavaTimer += dt;
+          if (c.userData.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            c.userData.lavaTimer = 0;
+            c.userData.hp -= LAVA_DAMAGE;
+            c.userData.hitFlash = 0.6;
+            if (c.userData.hp <= 0) { killCreeper(c); continue; }
+          }
+        } else {
+          c.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+        }
+        // 被弾/焼けフラッシュの減衰 (起爆中は下のフューズ処理が上書きする)
+        if (c.userData.hitFlash > 0) {
+          c.userData.hitFlash = Math.max(0, c.userData.hitFlash - dt * 2);
+          setCreeperFlash(c, c.userData.hitFlash);
+        }
+
         const dx = camera.position.x - c.position.x;
         const dz = camera.position.z - c.position.z;
         const dy = camera.position.y - c.position.y;
@@ -2502,6 +2568,7 @@
         const newY = creeperGroundY(newX, newZ);
         if (newY === null) continue;
         if (newY - c.position.y > CREEPER_STEP_HEIGHT) continue;
+        if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;  // 深い水は避ける (溺れ防止)
         c.position.x = newX;
         c.position.z = newZ;
         c.position.y = newY;
@@ -2517,6 +2584,8 @@
       { key: 'pig',      file: '3D/Pig.glb',      height: 0.9, target: 6, speed: 1.2, hp: 10, facing: 0, template: null, dimX: 0.9, dimZ: 0.9, radius: 0.45 },
       { key: 'villager', file: '3D/villager.glb', height: 1.9, target: 4, speed: 1.0, hp: 20, facing: 0, template: null, dimX: 0.6, dimZ: 0.6, radius: 0.3 },
       { key: 'chicken',  file: '3D/Chicken.glb',  height: 0.7, target: 6, speed: 1.3, hp: 4,  facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, glide: true },
+      // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
+      { key: 'slime',    file: '3D/スライム.glb', height: 1.0, target: 5, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.8, dimZ: 0.8, radius: 0.4, hop: true, timid: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
@@ -2527,6 +2596,9 @@
     const PMOB_ATTACK_DAMAGE = 4;     // 1クリックの与ダメージ
     const PMOB_FLEE_DURATION = 4;     // 被弾後に逃げる秒数
     const PMOB_FLEE_SPEED_MULT = 2.2; // 逃走中の速度倍率
+    const SLIME_HOP_SPEED = 6;        // ぴょんぴょん跳ねる周期の速さ
+    const SLIME_HOP_HEIGHT = 0.35;    // 跳ねる見た目の高さ
+    const SLIME_FLEE_RANGE = 7;       // この距離まで近づくと逃げ出す (臆病)
     let pmobSpawnTimer = 0;
 
     function countPassiveMobs(def) {
@@ -2538,6 +2610,8 @@
     function spawnPassiveMob(def, x, z) {
       if (!def.template) return;
       const group = def.template.clone(true);
+      // ホップ用: モデル本体(children[0])を上下させる。コライダ追加前に掴んでおく
+      const visual = group.children[0];
       // 個別フラッシュのため各メッシュのマテリアルをこの個体専用にクローン
       group.traverse((obj) => {
         if (!obj.isMesh) return;
@@ -2569,6 +2643,10 @@
       group.userData.heading = Math.random() * Math.PI * 2;
       group.userData.fleeTimer = 0;
       group.userData.hitFlash = 0;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;  // 触れた瞬間に即ダメージ
+      group.userData.visual = visual;                   // ホップ対象 (モデル本体)
+      group.userData.visualBaseY = visual ? visual.position.y : 0;
+      group.userData.hopPhase = Math.random() * Math.PI * 2;
       group.userData.soundTimer = 3 + Math.random() * 8;  // 村人アンビエント声の初回まで
       group.rotation.y = group.userData.heading + def.facing;
       scene.add(group);
@@ -2610,7 +2688,7 @@
         const dist = PMOB_SPAWN_MIN + Math.random() * (PMOB_SPAWN_MAX - PMOB_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null) { spawnPassiveMob(def, x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnPassiveMob(def, x, z); return true; }
       }
       return false;
     }
@@ -2646,6 +2724,25 @@
           setCreeperFlash(m, ud.hitFlash);  // 汎用フラッシュ (任意のGroupに適用可)
         }
 
+        // 溶岩ダメージ (全Mob共通): 触れている間、一定間隔でHPを削る
+        if (posTouchingLava(m.position.x, m.position.y, m.position.z, def.height)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0;
+            ud.hp -= LAVA_DAMAGE;
+            ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killPassiveMob(m); continue; }
+          }
+        } else {
+          ud.lavaTimer = LAVA_DAMAGE_INTERVAL;  // 離れたら次の接触で即ダメージ
+        }
+
+        // ホップ表示 (スライム等): モデル本体だけを上下させる (足元位置はそのまま)
+        if (def.hop && ud.visual) {
+          ud.hopPhase += dt * SLIME_HOP_SPEED;
+          ud.visual.position.y = ud.visualBaseY + Math.abs(Math.sin(ud.hopPhase)) * SLIME_HOP_HEIGHT;
+        }
+
         // 滑空Mob (ニワトリ): 段差を降りた後はゆっくり地面まで落下 (本家のスローフォール)
         if (def.glide) {
           const gy = creeperGroundY(m.position.x, m.position.z);
@@ -2665,6 +2762,18 @@
               const adz = camera.position.z - m.position.z;
               playVillagerSound('ambient', Math.sqrt(adx * adx + ady * ady + adz * adz));
             }
+          }
+        }
+
+        // 臆病Mob (スライム): プレイヤーが近づくと逃げ出す
+        if (def.timid) {
+          const pdx = m.position.x - camera.position.x;
+          const pdz = m.position.z - camera.position.z;
+          const pd = Math.sqrt(pdx * pdx + pdz * pdz);
+          if (pd < SLIME_FLEE_RANGE && pd > 0.001) {
+            ud.heading = Math.atan2(pdx, pdz);  // プレイヤーと反対方向
+            ud.state = 'flee';
+            ud.fleeTimer = PMOB_FLEE_DURATION;
           }
         }
 
@@ -2696,8 +2805,8 @@
         const newX = m.position.x + dirX * speed * dt;
         const newZ = m.position.z + dirZ * speed * dt;
         const newY = creeperGroundY(newX, newZ);
-        if (newY === null || newY - m.position.y > PMOB_STEP_HEIGHT) {
-          // 壁/(滑空Mob以外は)崖: 向きを変える
+        if (newY === null || newY - m.position.y > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
+          // 壁/崖/深い水(溺れ防止): 向きを変える
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
           continue;
         }
