@@ -2070,9 +2070,8 @@
 
     // ソニックブームの視覚エフェクト (ウォーデン→プレイヤーへ伸びて広がる衝撃波)
     const sonicBeams = [];
-    function spawnSonicBeam(w) {
+    function spawnSonicBeam(w, to) {
       const from = new THREE.Vector3(w.position.x, w.position.y + WARDEN_HEIGHT * 0.6, w.position.z);
-      const to = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
       const dir = to.clone().sub(from);
       const len = Math.max(0.5, dir.length());
       const geo = new THREE.BoxGeometry(0.5, 0.5, len);
@@ -2101,11 +2100,34 @@
       }
     }
 
+    // ウォーデンの口元→プレイヤー目線の間に固体ブロック(壁など)があるか調べる。
+    // 障害物に遮られていれば、ソニックブームは透過してダメージを与えない。
+    // 戻り値: { blocked, point } point は遮蔽点(壁の手前) or プレイヤー位置 (=ビームの終点)
+    function sonicLineOfSight(w) {
+      const fromX = w.position.x, fromY = w.position.y + WARDEN_HEIGHT * 0.6, fromZ = w.position.z;
+      const toX = camera.position.x, toY = camera.position.y, toZ = camera.position.z;
+      const dx = toX - fromX, dy = toY - fromY, dz = toZ - fromZ;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.0001;
+      const steps = Math.ceil(dist / 0.25);  // 0.25マス間隔で走査 (1マスの壁を取りこぼさない細かさ)
+      const ix = dx / steps, iy = dy / steps, iz = dz / steps;
+      let px = fromX, py = fromY, pz = fromZ;
+      // 端点(ウォーデン自身・プレイヤー自身のマス)は除外して途中だけ調べる
+      for (let s = 1; s < steps; s++) {
+        px += ix; py += iy; pz += iz;
+        if (isSolidAt(Math.round(px), Math.round(py), Math.round(pz))) {
+          // 壁の手前で止める (ビームは壁にぶつかって消える見た目に)
+          return { blocked: true, point: new THREE.Vector3(px - ix, py - iy, pz - iz) };
+        }
+      }
+      return { blocked: false, point: new THREE.Vector3(toX, toY, toZ) };
+    }
+
     function fireSonicBoom(w, dist) {
       playWardenSound('sonic-fire', dist);
-      spawnSonicBeam(w);
-      // ソニックブームは防具・壁を貫通する本家仕様 → 無敵時間を無視してダメージ
-      if (dist < WARDEN_SONIC_MAX + 5) damagePlayer(WARDEN_SONIC_DAMAGE, true);
+      const los = sonicLineOfSight(w);
+      spawnSonicBeam(w, los.point);  // 遮られた時は壁の手前までしか伸ばさない
+      // 壁などの障害物に遮られていなければダメージ (透過して当てることはない)
+      if (!los.blocked && dist < WARDEN_SONIC_MAX + 5) damagePlayer(WARDEN_SONIC_DAMAGE, true);
     }
 
     function updateWardenHUD(nearest, dist) {
