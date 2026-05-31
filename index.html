@@ -288,7 +288,7 @@
     import * as THREE from 'three';
     import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-    import { createNoise2D } from 'https://cdn.skypack.dev/simplex-noise@4';
+    import { createNoise2D, createNoise3D } from 'https://cdn.skypack.dev/simplex-noise@4';
 
     // タッチデバイス検出 (iPhone/iPad等)。?touch=1 で強制 (PC でのUI確認用)
     const isTouch = matchMedia('(pointer: coarse)').matches || ('ontouchstart' in window) || location.search.includes('touch');
@@ -862,8 +862,20 @@
     const heightNoise = createNoise2D();
     // バイオーム用ノイズ (砂/土の振り分け)
     const biomeNoise = createNoise2D();
+    // 洞窟用 3D ノイズ (地中をくり抜く)
+    const caveNoise = createNoise3D();
     const HEIGHT_MIN = 5;
     const HEIGHT_MAX = 11;
+
+    // ===== 地中 (縦の深さ) の生成設定 =====
+    const STONE_INDEX    = 2;   // 石
+    const OBSIDIAN_INDEX = 8;   // 黒曜石 (最下層 ≒ 岩盤)
+    const BEDROCK_Y      = -16; // 最下層の高さ (ここに黒曜石を敷く)
+    const DEEP_LAVA_Y    = -10; // この高さ以下の洞窟空間は溶岩で満たす
+    // (x,y,z) が洞窟(空洞)か? — |3Dノイズ| が閾値を超えるとくり抜く (曲がりくねった洞窟)
+    function isCave(x, y, z) {
+      return Math.abs(caveNoise(x * 0.09, y * 0.13, z * 0.09)) > 0.67;
+    }
 
     function terrainHeight(x, z) {
       // 4オクターブのフラクタルノイズ (amplitude 1/2 ずつ、freq 2倍ずつ)
@@ -904,11 +916,22 @@
     const LAVA_CHANCE = 0.12;        // セルが溶岩湖になる確率 (それ以外の湖は水)
     const LAVA_SALT = 777;           // 溶岩判定用のハッシュソルト
 
+    // ===== 地中の深層生成 (プレイヤー周辺だけ縦に掘り下げる) =====
+    // 地表は LOAD_RADIUS まで生成するが、地中(石・洞窟・溶岩)は遠くからは見えないので
+    // プレイヤー周辺の狭い半径だけ生成する。描画インスタンス数を抑えつつ縦の探索を可能にする。
+    const DEEP_RADIUS = 26;          // この半径内の列だけ地中を生成
+    const DEEP_DEMOTE_RADIUS = 32;   // この半径外に出たら地中ブロックを破棄 (ヒステリシス)
+    const DEEP_LOADS_PER_FRAME = 12; // 1フレームで地中生成する列数
+    const DEEP_UNLOADS_PER_FRAME = 24;
+
     const colKey = (cx, cz) => cx + ',' + cz;
     const loadedColumns = new Map(); // "cx,cz" → [その列が生成したブロックキー...]
+    const deepLoaded = new Map();    // "cx,cz" → [その列が生成した地中ブロックキー...]
     const edits = new Map();         // "cx,cz" → Map("x,y,z" → typeIndex | -1(=破壊))
     const loadQueue = [];            // 生成待ち {cx,cz,d2}
     const unloadQueue = [];          // 破棄待ち "cx,cz"
+    const deepLoadQueue = [];        // 地中生成待ち {cx,cz,d2}
+    const deepUnloadQueue = [];      // 地中破棄待ち "cx,cz"
 
     // 座標から決定論的な擬似乱数 [0,1) — 同じ座標なら毎回同じ値 (再生成しても地形が変わらない)
     function hashRand(x, z, salt) {
@@ -995,6 +1018,52 @@
         removeBlock(bx, by, bz);
       }
       loadedColumns.delete(ck);
+      unloadDeepColumn(ck);  // 地表を捨てるときは地中も一緒に
+    }
+
+    // 指定座標にプレイヤーの改変があるか? (地中生成が改変を上書きしないよう確認)
+    function hasEdit(cx, cz, x, y, z) {
+      const e = edits.get(colKey(cx, cz));
+      return e ? e.has(key(x, y, z)) : false;
+    }
+
+    // 1列の地中(石・洞窟・溶岩・岩盤)を生成。地表 generateColumn が h-3,h-4 まで石を
+    // 置いているので、その下 (h-5) から最下層 BEDROCK_Y まで掘り下げる。
+    // 改変済み(掘った/置いた)座標は地表 generateColumn が処理済みなので触らない。
+    function generateDeepColumn(cx, cz) {
+      const ck = colKey(cx, cz);
+      if (deepLoaded.has(ck)) return;
+      if (!loadedColumns.has(ck)) generateColumn(cx, cz);  // 地表が未生成なら先に
+      const h = terrainHeight(cx, cz);
+      const keys = [];
+      for (let y = h - 5; y >= BEDROCK_Y; y--) {
+        if (hasEdit(cx, cz, cx, y, cz)) continue;  // 改変済みは地表側が管理
+        if (y === BEDROCK_Y) {                     // 最下層は黒曜石で封をする
+          if (addBlock(cx, y, cz, OBSIDIAN_INDEX)) keys.push(key(cx, y, cz));
+          continue;
+        }
+        if (isCave(cx, y, cz)) {
+          // 洞窟(空洞)。深いところは溶岩で満たす → 下へ行くと溶岩がある
+          if (y <= DEEP_LAVA_Y) {
+            if (addBlock(cx, y, cz, LAVA_INDEX)) keys.push(key(cx, y, cz));
+          }
+          // それ以外の洞窟は空気のまま (何も置かない)
+        } else {
+          if (addBlock(cx, y, cz, STONE_INDEX)) keys.push(key(cx, y, cz));
+        }
+      }
+      deepLoaded.set(ck, keys);
+    }
+
+    // 1列の地中ブロックだけを破棄 (地表ブロックは残す)
+    function unloadDeepColumn(ck) {
+      const keys = deepLoaded.get(ck);
+      if (!keys) return;
+      for (const k of keys) {
+        const [bx, by, bz] = k.split(',').map(Number);
+        removeBlock(bx, by, bz);
+      }
+      deepLoaded.delete(ck);
     }
 
     // プレイヤーの改変(設置/破壊)を記録 — 再生成しても保たれる (val: typeIndex か -1=破壊)
@@ -1067,6 +1136,27 @@
           const ddx = cx - pcx, ddz = cz - pcz;
           if (ddx * ddx + ddz * ddz > U2) unloadQueue.push(ck);
         }
+        // 地中: 近場だけ縦に掘り下げ、離れたら破棄 (ヒステリシス)
+        deepLoadQueue.length = 0;
+        deepUnloadQueue.length = 0;
+        const DR = DEEP_RADIUS, DR2 = DR * DR;
+        for (let dz = -DR; dz <= DR; dz++) {
+          for (let dx = -DR; dx <= DR; dx++) {
+            const d2 = dx * dx + dz * dz;
+            if (d2 > DR2) continue;
+            const cx = pcx + dx, cz = pcz + dz;
+            if (deepLoaded.has(colKey(cx, cz))) continue;
+            deepLoadQueue.push({ cx, cz, d2 });
+          }
+        }
+        deepLoadQueue.sort((a, b) => a.d2 - b.d2);
+        const DD2 = DEEP_DEMOTE_RADIUS * DEEP_DEMOTE_RADIUS;
+        for (const ck of deepLoaded.keys()) {
+          const ci = ck.indexOf(',');
+          const cx = +ck.slice(0, ci), cz = +ck.slice(ci + 1);
+          const ddx = cx - pcx, ddz = cz - pcz;
+          if (ddx * ddx + ddz * ddz > DD2) deepUnloadQueue.push(ck);
+        }
       }
       // 予算ぶんだけ生成
       let n = COLUMNS_PER_FRAME;
@@ -1078,6 +1168,16 @@
       let m = UNLOADS_PER_FRAME;
       while (m-- > 0 && unloadQueue.length) {
         unloadColumn(unloadQueue.shift());
+      }
+      // 地中: 予算ぶんだけ生成 / 破棄
+      let dn = DEEP_LOADS_PER_FRAME;
+      while (dn-- > 0 && deepLoadQueue.length) {
+        const c = deepLoadQueue.shift();
+        generateDeepColumn(c.cx, c.cz);
+      }
+      let dm = DEEP_UNLOADS_PER_FRAME;
+      while (dm-- > 0 && deepUnloadQueue.length) {
+        unloadDeepColumn(deepUnloadQueue.shift());
       }
     }
 
@@ -1269,7 +1369,7 @@
     let onGround = false;
     let fallStartY = null;       // 落下中のピークY (着地時にダメージ計算)
     const FALL_SAFE_HEIGHT = 4;  // この高さ以上落ちるとダメージ
-    const VOID_Y = -10;          // この高さ以下に落ちたら即死
+    const VOID_Y = BEDROCK_Y - 5;  // 岩盤より下に落ちたら即死 (奈落)
     const SPEED = 5;
     const DASH_MULTIPLIER = 2.0;        // ダッシュ時の速度倍率
     const DOUBLE_TAP_WINDOW = 0.3;      // W連打受付の時間 (秒)
@@ -1294,7 +1394,7 @@
       const px = Math.round(x);
       const pz = Math.round(z);
       const maxReach = refY - 1.5 + STEP_HEIGHT + 0.05;  // 足元 + ステップ高
-      for (let y = 20; y >= -10; y--) {
+      for (let y = 20; y >= BEDROCK_Y; y--) {
         if (isSolidAt(px, y, pz)) {
           const blockTop = y + 0.5;
           if (blockTop <= maxReach) return blockTop + 1.5;
@@ -1555,7 +1655,7 @@
     function creeperGroundY(x, z) {
       const px = Math.round(x);
       const pz = Math.round(z);
-      for (let y = 20; y >= -10; y--) {
+      for (let y = 20; y >= BEDROCK_Y; y--) {
         if (isSolidAt(px, y, pz)) return y + 0.5;
       }
       return null;
@@ -3346,7 +3446,6 @@
     }
 
     animate();
-
 
 
 
