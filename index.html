@@ -373,12 +373,12 @@
             `<rect x='7.5' y='14.5' width='9' height='2.4' rx='1' fill='${handle}'/>` +
             `<rect x='10.7' y='16.5' width='2.6' height='4.5' rx='1' fill='${handle}'/>`;
       }
-      return svgDataURI(`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>${g}</svg>`);
+      return svgDataURI(`<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>${g}</svg>`);
     }
 
     // TNT アイコン (赤い箱 + 導火線)
     const TNT_ICON = svgDataURI(
-      "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>" +
+      "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" +
       "<rect x='3' y='6' width='18' height='15' rx='1.2' fill='#c0392b' stroke='#7b241c' stroke-width='1'/>" +
       "<rect x='3' y='10.5' width='18' height='5' fill='#f4f4f4'/>" +
       "<text x='12' y='14.7' font-size='4.5' font-family='Arial,sans-serif' font-weight='bold' fill='#c0392b' text-anchor='middle'>TNT</text>" +
@@ -633,13 +633,16 @@
       hand.add(heldBlockCube);
     }
 
-    // アイコン(SVG data URI)をテクスチャ化してキャッシュ (ドット感のため NearestFilter)
+    // アイコン(SVG data URI)を高解像度テクスチャ化してキャッシュ
+    // SVGは256pxでラスタライズ済み。ベクター図形なので線形補間+異方性で滑らかに。
     function heldIconTexture(uri) {
       let tex = _heldIconTexCache[uri];
       if (!tex) {
         tex = textureLoader.load(uri);
-        tex.magFilter = THREE.NearestFilter;
-        tex.minFilter = THREE.NearestFilter;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.generateMipmaps = true;
+        tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
         tex.colorSpace = THREE.SRGBColorSpace;
         _heldIconTexCache[uri] = tex;
       }
@@ -2758,6 +2761,7 @@
     }
 
     animate();
+
 
 
 
