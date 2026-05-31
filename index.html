@@ -614,7 +614,7 @@
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.Fog(0x87CEEB, 28, 64);  // far はストリーミング半径(LOAD_RADIUS)以内に
 
-    const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(85, innerWidth / innerHeight, 0.1, 1000);  // 視野角を広めに (引いた・遠めの見え方)
     camera.position.set(96, 15, 96);  // 192×192 ワールドの中央
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
