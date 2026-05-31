@@ -1484,6 +1484,12 @@
     function unstickPlayer() {
       // 体が今いる列のブロックと重なっていなければ何もしない
       if (!hasCeiling(camera.position.x, camera.position.z, camera.position.y)) return;
+      // 通常の段差登り中は、体が一瞬ステップブロックへ重なる。これは段差イージングが
+      // 滑らかに持ち上げて解決する正常な状態。ここで +1 スナップ救出すると目標の床を
+      // 行き過ぎてしまい、一段ごとに上へピョコンと跳ねて揺れて見える。
+      // 登れる床へ向けて上昇中 (視点が床より下) なら救出せず、イージングに任せる。
+      const floorY = getFloorY(camera.position.x, camera.position.z);
+      if (floorY > -Infinity && camera.position.y < floorY) return;
       let guard = 0;
       // 体が抜ける高さまで 1 ブロックずつ持ち上げる (最初の空洞 or 地表で止まる)
       while (hasCeiling(camera.position.x, camera.position.z, camera.position.y) && guard++ < 256) {
@@ -3708,7 +3714,6 @@
     }
 
     animate();
-
 
 
     // ===== リサイズ対応 =====
