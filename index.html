@@ -74,6 +74,31 @@
       background: rgba(255, 0, 0, 0.35);
       transition: background 0.05s;
     }
+    /* ウォーデン接近時の暗闇エフェクト (中心は透明、周辺ほど暗い) */
+    #warden-darkness {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0; z-index: 90;
+      background: radial-gradient(ellipse at center, rgba(0,0,0,0) 32%, rgba(0,0,0,0.96) 100%);
+      transition: opacity 0.4s;
+    }
+    /* ウォーデンのボスHPバー (上部中央) */
+    #warden-bossbar {
+      position: absolute; top: 44px; left: 50%; transform: translateX(-50%);
+      width: 360px; max-width: 70vw; height: 18px;
+      background: rgba(0,0,0,0.55); border-radius: 9px;
+      overflow: hidden; pointer-events: none; display: none; z-index: 95;
+      border: 1px solid rgba(120,200,255,0.45);
+    }
+    #warden-bossfill {
+      position: absolute; inset: 0;
+      background: linear-gradient(to right, #1b6e8c, #6fe3ff);
+      width: 100%; transition: width 0.2s;
+    }
+    #warden-bosstext {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: #dff6ff; font-size: 12px; font-weight: bold; letter-spacing: 3px;
+      text-shadow: 0 0 4px black;
+    }
     #gameover {
       position: absolute; inset: 0;
       background: rgba(0,0,0,0.82); color: white;
@@ -235,6 +260,8 @@
   <div id="breakbar"><div id="breakfill"></div></div>
   <div id="hotbar"></div>
   <div id="damage-flash"></div>
+  <div id="warden-darkness"></div>
+  <div id="warden-bossbar"><div id="warden-bossfill"></div><span id="warden-bosstext">ウォーデン</span></div>
   <div id="gameover">
     <div>GAME OVER</div>
     <button onclick="location.reload()">リトライ</button>
@@ -1408,15 +1435,28 @@
       // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
       const creeperHits = raycaster.intersectObjects(creepers, true);
-      // 受動Mobは不可視ボックスコライダのみを対象に (細かいメッシュより当たり判定が正確)
+      // 受動Mob・ウォーデンは不可視ボックスコライダのみを対象に (細かいメッシュより当たり判定が正確)
       const passiveHits = raycaster.intersectObjects(passiveColliders, false);
+      const wardenHits = raycaster.intersectObjects(wardenColliders, false);
       const bh = blockHits[0];
       const ch = creeperHits[0];
       const ph = passiveHits[0];
+      const wh = wardenHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
+      if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
       if (!hit || hit.distance > 8) return;
+
+      // ウォーデン: 左クリックで攻撃 (HP制。大量に殴る必要あり)
+      if (hitType === 'warden') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !wardens.includes(g)) g = g.parent;
+          if (g) { hitWarden(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
 
       // クリーパー
       if (hitType === 'creeper') {
@@ -1728,6 +1768,388 @@
       }
     }
 
+    // ===== ウォーデン (最凶の敵Mob) =====
+    // 本家準拠: 巨大な当たり判定(幅0.9×高さ2.9)、超高HP、即死級の近接攻撃、
+    // 防具/壁を貫通する遠距離ソニックブーム。視界に頼らず執拗にプレイヤーを追う。
+    const wardens = [];
+    const wardenColliders = [];   // 不可視ボックス (クリック判定の単一ソース = 正確な当たり判定)
+    const _wardenColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    let wardenModelTemplate = null;
+    let wardensReady = false;
+
+    const WARDEN_WIDTH = 0.9;            // 当たり判定の幅 (本家: 0.9)
+    const WARDEN_HEIGHT = 2.9;           // 当たり判定の高さ (本家: 2.9)
+    const WARDEN_RADIUS = WARDEN_WIDTH / 2;
+    const WARDEN_FACING_OFFSET = 0;      // モデルの正面が逆なら Math.PI
+    const WARDEN_HP = 140;               // 非常にタフ (剣でも数十発)
+    const WARDEN_SPEED = 3.5;            // 速い。歩きでは引き離せず、ダッシュでやっと逃げられる
+    const WARDEN_STEP_HEIGHT = 1.2;      // 登れる段差
+    const WARDEN_SIGHT = 45;             // この距離以内なら必ず気づいて追う
+    const WARDEN_MELEE_RANGE = 2.8;      // 近接攻撃の届く距離 (体が大きいのでリーチ長め)
+    const WARDEN_MELEE_DAMAGE = 16;      // 近接の一撃 (満タンHP20をほぼ持っていく)
+    const WARDEN_MELEE_COOLDOWN = 1.1;   // 近接の間隔(秒)
+    const WARDEN_SONIC_MIN = 6;          // この距離以上でソニックブームを使う
+    const WARDEN_SONIC_MAX = 30;         // この距離以内でソニックブーム
+    const WARDEN_SONIC_DAMAGE = 8;       // ソニックブーム (防御無視)
+    const WARDEN_SONIC_COOLDOWN = 4.5;   // ソニックブームの間隔(秒)
+    const WARDEN_SONIC_CHARGE = 0.9;     // 発射前のチャージ時間(秒)
+    const WARDEN_TARGET = 1;             // 周囲に保つ個体数 (1体でも十分な脅威)
+    const WARDEN_SPAWN_MIN = 28;
+    const WARDEN_SPAWN_MAX = 50;
+    const WARDEN_DESPAWN_DIST = 72;
+    const WARDEN_SPAWN_INTERVAL = 8;     // 補充判定の間隔(秒) - 出現は控えめ
+    let wardenSpawnTimer = 0;
+
+    const wardenDarknessEl = document.getElementById('warden-darkness');
+    const wardenBossbarEl = document.getElementById('warden-bossbar');
+    const wardenBossfillEl = document.getElementById('warden-bossfill');
+
+    // プレイヤー位置がいずれかのウォーデンと重なるか? (体当たりすり抜け防止)
+    function isOverlappingWarden(x, z, y) {
+      const combined = PLAYER_RADIUS + WARDEN_RADIUS;
+      for (const w of wardens) {
+        const dy = y - w.position.y;
+        if (dy < -0.4 || dy > WARDEN_HEIGHT + 1.0) continue;
+        if (Math.abs(x - w.position.x) < combined && Math.abs(z - w.position.z) < combined) return true;
+      }
+      return false;
+    }
+
+    function spawnWarden(x, z) {
+      if (!wardenModelTemplate) return;
+      const group = wardenModelTemplate.clone(true);
+      // 個別フラッシュのため各メッシュのマテリアルをこの個体専用にクローン
+      group.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.userData.wardenGroup = group;
+        if (Array.isArray(obj.material)) {
+          obj.material = obj.material.map(m => m.clone());
+          obj.userData.origColors = obj.material.map(m => m.color.clone());
+        } else if (obj.material) {
+          obj.material = obj.material.clone();
+          obj.userData.origColors = [obj.material.color.clone()];
+        }
+      });
+      // 不可視ボックスコライダ (クリック判定 = 本家準拠サイズ)
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(WARDEN_WIDTH, WARDEN_HEIGHT, WARDEN_WIDTH), _wardenColliderMat);
+      collider.position.y = WARDEN_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.wardenGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      wardenColliders.push(collider);
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = WARDEN_HP;
+      group.userData.maxHp = WARDEN_HP;
+      group.userData.hitFlash = 0;
+      group.userData.meleeCd = 0;
+      group.userData.sonicCd = WARDEN_SONIC_COOLDOWN * (0.5 + Math.random());
+      group.userData.sonicCharge = 0;   // >0 のときチャージ中(動けない)
+      group.userData.heartTimer = 0;
+      scene.add(group);
+      wardens.push(group);
+    }
+
+    function killWarden(group) {
+      scene.remove(group);
+      const idx = wardens.indexOf(group);
+      if (idx !== -1) wardens.splice(idx, 1);
+      const ci = wardenColliders.indexOf(group.userData.collider);
+      if (ci !== -1) wardenColliders.splice(ci, 1);
+    }
+
+    function _wardenDist(group) {
+      const dx = camera.position.x - group.position.x;
+      const dy = camera.position.y - group.position.y;
+      const dz = camera.position.z - group.position.z;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // クリック攻撃: ダメージ → フラッシュ → 0で死亡
+    function hitWarden(group, damage) {
+      group.userData.hp -= (damage || 4);
+      group.userData.hitFlash = 0.5;
+      const d = _wardenDist(group);
+      if (group.userData.hp <= 0) { playWardenSound('death', d); killWarden(group); }
+      else playWardenSound('hurt', d);
+    }
+
+    function trySpawnWardenNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = WARDEN_SPAWN_MIN + Math.random() * (WARDEN_SPAWN_MAX - WARDEN_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null) { spawnWarden(x, z); return true; }
+      }
+      return false;
+    }
+
+    function spawnInitialWardens() {
+      wardensReady = true;
+      let guard = 0;
+      while (wardens.length < WARDEN_TARGET && guard++ < 40) trySpawnWardenNearPlayer();
+    }
+
+    function manageWardens(dt) {
+      if (!wardensReady) return;
+      const D2 = WARDEN_DESPAWN_DIST * WARDEN_DESPAWN_DIST;
+      for (let i = wardens.length - 1; i >= 0; i--) {
+        const w = wardens[i];
+        if (w.userData.sonicCharge > 0) continue;  // チャージ中は消さない
+        const dx = camera.position.x - w.position.x;
+        const dz = camera.position.z - w.position.z;
+        if (dx * dx + dz * dz > D2) killWarden(w);
+      }
+      wardenSpawnTimer += dt;
+      if (wardenSpawnTimer >= WARDEN_SPAWN_INTERVAL) {
+        wardenSpawnTimer = 0;
+        if (wardens.length < WARDEN_TARGET) trySpawnWardenNearPlayer();
+      }
+    }
+
+    // ソニックブームの視覚エフェクト (ウォーデン→プレイヤーへ伸びて広がる衝撃波)
+    const sonicBeams = [];
+    function spawnSonicBeam(w) {
+      const from = new THREE.Vector3(w.position.x, w.position.y + WARDEN_HEIGHT * 0.6, w.position.z);
+      const to = new THREE.Vector3(camera.position.x, camera.position.y, camera.position.z);
+      const dir = to.clone().sub(from);
+      const len = Math.max(0.5, dir.length());
+      const geo = new THREE.BoxGeometry(0.5, 0.5, len);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x6fe3ff, transparent: true, opacity: 0.75, depthWrite: false });
+      const beam = new THREE.Mesh(geo, mat);
+      beam.position.copy(from).add(dir.clone().multiplyScalar(0.5));
+      beam.lookAt(to);
+      beam.raycast = () => {};
+      scene.add(beam);
+      sonicBeams.push({ mesh: beam, life: 0.35, maxLife: 0.35 });
+    }
+    function updateSonicBeams(dt) {
+      for (let i = sonicBeams.length - 1; i >= 0; i--) {
+        const b = sonicBeams[i];
+        b.life -= dt;
+        const t = Math.max(0, b.life / b.maxLife);
+        b.mesh.material.opacity = 0.75 * t;
+        const grow = 1 + (1 - t) * 4;
+        b.mesh.scale.set(grow, grow, 1);
+        if (b.life <= 0) {
+          scene.remove(b.mesh);
+          b.mesh.geometry.dispose();
+          b.mesh.material.dispose();
+          sonicBeams.splice(i, 1);
+        }
+      }
+    }
+
+    function fireSonicBoom(w, dist) {
+      playWardenSound('sonic-fire', dist);
+      spawnSonicBeam(w);
+      // ソニックブームは防具・壁を貫通する本家仕様 → 無敵時間を無視してダメージ
+      if (dist < WARDEN_SONIC_MAX + 5) damagePlayer(WARDEN_SONIC_DAMAGE, true);
+    }
+
+    function updateWardenHUD(nearest, dist) {
+      if (nearest && dist < WARDEN_SIGHT) {
+        const frac = Math.max(0, nearest.userData.hp / nearest.userData.maxHp);
+        wardenBossbarEl.style.display = 'block';
+        wardenBossfillEl.style.width = `${frac * 100}%`;
+        // 近いほど画面を暗く (本家の暗闇エフェクト風)
+        const dark = Math.max(0, 1 - dist / WARDEN_SIGHT) * 0.55;
+        wardenDarknessEl.style.opacity = dark.toFixed(2);
+      } else {
+        wardenBossbarEl.style.display = 'none';
+        wardenDarknessEl.style.opacity = '0';
+      }
+    }
+
+    function updateWardens(dt) {
+      let nearest = null, nearestDist = Infinity;
+      for (let i = wardens.length - 1; i >= 0; i--) {
+        const w = wardens[i];
+        const ud = w.userData;
+        // 被弾フラッシュの減衰
+        if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(w, ud.hitFlash); }
+
+        const dx = camera.position.x - w.position.x;
+        const dz = camera.position.z - w.position.z;
+        const dy = camera.position.y - w.position.y;
+        const horiz = Math.sqrt(dx * dx + dz * dz) || 0.0001;
+        const dist = Math.sqrt(horiz * horiz + dy * dy);
+        if (dist < nearestDist) { nearestDist = dist; nearest = w; }
+
+        // クールダウン進行
+        ud.meleeCd = Math.max(0, ud.meleeCd - dt);
+        ud.sonicCd = Math.max(0, ud.sonicCd - dt);
+
+        // 常にプレイヤーの方を向く (視界に頼らず追跡)
+        w.rotation.y = Math.atan2(dx, dz) + WARDEN_FACING_OFFSET;
+
+        if (dist > WARDEN_SIGHT) continue;
+
+        // 心音 (近いほど速く打つ) - ウォーデン最大の恐怖演出
+        ud.heartTimer -= dt;
+        if (ud.heartTimer <= 0) {
+          ud.heartTimer = 0.45 + (Math.min(dist, WARDEN_SIGHT) / WARDEN_SIGHT) * 1.1;
+          if (controls.isLocked) playWardenSound('heartbeat', dist);
+        }
+
+        // ソニックブームのチャージ中は動かず、終わったら発射
+        if (ud.sonicCharge > 0) {
+          ud.sonicCharge -= dt;
+          const wob = 1 + Math.sin(performance.now() * 0.05) * 0.04;
+          w.scale.setScalar(wob);
+          if (ud.sonicCharge <= 0) {
+            w.scale.setScalar(1);
+            fireSonicBoom(w, dist);
+            ud.sonicCd = WARDEN_SONIC_COOLDOWN;
+          }
+          continue;
+        }
+
+        // 近接攻撃 (張り付いて殴る)
+        if (dist < WARDEN_MELEE_RANGE && Math.abs(dy) < 3) {
+          if (ud.meleeCd <= 0) {
+            damagePlayer(WARDEN_MELEE_DAMAGE);
+            ud.meleeCd = WARDEN_MELEE_COOLDOWN;
+            playWardenSound('roar', dist);
+            w.scale.setScalar(1.1);
+            setTimeout(() => { if (w.parent) w.scale.setScalar(1); }, 120);
+          }
+          continue;  // 近接圏では追わず張り付く
+        }
+
+        // 中距離ならソニックブームをチャージ開始
+        if (horiz > WARDEN_SONIC_MIN && dist < WARDEN_SONIC_MAX && ud.sonicCd <= 0) {
+          ud.sonicCharge = WARDEN_SONIC_CHARGE;
+          playWardenSound('sonic-charge', dist);
+          continue;
+        }
+
+        // 通常移動: プレイヤーへ直進
+        const nx = dx / horiz, nz = dz / horiz;
+        const newX = w.position.x + nx * WARDEN_SPEED * dt;
+        const newZ = w.position.z + nz * WARDEN_SPEED * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null) continue;
+        if (newY - w.position.y > WARDEN_STEP_HEIGHT) continue;
+        w.position.x = newX;
+        w.position.z = newZ;
+        w.position.y = newY;
+      }
+      updateWardenHUD(nearest, nearestDist);
+    }
+
+    // ウォーデンの効果音 (Web Audio 合成): 心音・咆哮・被弾・死亡・ソニックブーム
+    function playWardenSound(kind, dist) {
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      const RANGE = 42;
+      let att = 1 - (dist || 0) / RANGE;
+      if (att <= 0.02) return;
+      att = Math.min(1, att);
+
+      if (kind === 'heartbeat') {
+        for (const off of [0, 0.17]) {   // "ドッ・ドッ" の2連
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type = 'sine';
+          o.frequency.setValueAtTime(72, now + off);
+          o.frequency.exponentialRampToValueAtTime(36, now + off + 0.14);
+          g.gain.setValueAtTime(0.0001, now + off);
+          g.gain.exponentialRampToValueAtTime(0.5 * att, now + off + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.19);
+          o.connect(g).connect(ctx.destination);
+          o.start(now + off); o.stop(now + off + 0.22);
+        }
+        return;
+      }
+
+      if (kind === 'roar' || kind === 'hurt' || kind === 'death') {
+        const dur = kind === 'death' ? 1.1 : (kind === 'roar' ? 0.6 : 0.4);
+        const endF = kind === 'death' ? 50 : 80;
+        const base = kind === 'death' ? 150 : 210;
+        const o = ctx.createOscillator();
+        const o2 = ctx.createOscillator();
+        const g = ctx.createGain();
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 620; lp.Q.value = 4;
+        o.type = 'sawtooth'; o2.type = 'square';
+        o.frequency.setValueAtTime(base, now);
+        o.frequency.exponentialRampToValueAtTime(endF, now + dur);
+        o2.frequency.setValueAtTime(base * 0.5, now);
+        o2.frequency.exponentialRampToValueAtTime(endF * 0.5, now + dur);
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(0.5 * att, now + 0.05);
+        g.gain.setValueAtTime(0.5 * att, now + dur * 0.5);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        o.connect(lp); o2.connect(lp); lp.connect(g).connect(ctx.destination);
+        o.start(now); o.stop(now + dur + 0.02);
+        o2.start(now); o2.stop(now + dur + 0.02);
+        return;
+      }
+
+      if (kind === 'sonic-charge') {   // 上昇する不気味なチャージ音
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(180, now);
+        o.frequency.exponentialRampToValueAtTime(720, now + WARDEN_SONIC_CHARGE);
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(0.22 * att, now + 0.1);
+        g.gain.setValueAtTime(0.22 * att, now + WARDEN_SONIC_CHARGE * 0.8);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + WARDEN_SONIC_CHARGE);
+        o.connect(g).connect(ctx.destination);
+        o.start(now); o.stop(now + WARDEN_SONIC_CHARGE + 0.02);
+        return;
+      }
+
+      if (kind === 'sonic-fire') {   // 下降スイープ + ノイズ衝撃
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(950, now);
+        o.frequency.exponentialRampToValueAtTime(110, now + 0.4);
+        g.gain.setValueAtTime(0.0001, now);
+        g.gain.exponentialRampToValueAtTime(0.45 * att, now + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+        o.connect(g).connect(ctx.destination);
+        o.start(now); o.stop(now + 0.52);
+        const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.4), ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.3 * att, now);
+        ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+        src.connect(ng).connect(ctx.destination);
+        src.start(now); src.stop(now + 0.4);
+        return;
+      }
+    }
+
+    // Warden GLB を非同期ロード → 完了後にプレイヤー周囲へ初期スポーン
+    gltfLoader.load(
+      '3D/Warden.glb',
+      (gltf) => {
+        const model = gltf.scene;
+        const box = new THREE.Box3().setFromObject(model);
+        const size = box.getSize(new THREE.Vector3());
+        if (size.y > 0) model.scale.setScalar(WARDEN_HEIGHT / size.y);  // 高さ2.9マスに正規化
+        model.updateMatrixWorld();
+        const box2 = new THREE.Box3().setFromObject(model);
+        model.position.y -= box2.min.y;  // 足元 = y=0
+        model.rotation.y = WARDEN_FACING_OFFSET;
+        const wrapper = new THREE.Group();
+        wrapper.add(model);
+        wardenModelTemplate = wrapper;
+        spawnInitialWardens();
+      },
+      undefined,
+      (err) => { console.warn('Warden.glb ロード失敗:', err); }
+    );
+
     // ===== 爆発パーティクル =====
     const explosionParticles = [];
     const _particleGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
@@ -1883,6 +2305,15 @@
         const c = creepers[i];
         const d = Math.hypot(c.position.x - cx, (c.position.y + 0.9) - cy, c.position.z - cz);
         if (d < EXPLOSION_RADIUS + 1) { stopCreeperHiss(c); scene.remove(c); creepers.splice(i, 1); }
+      }
+      // 圏内のウォーデンにダメージ (TNTで挑むための手段。逆順ループでkill時のspliceも安全)
+      for (let i = wardens.length - 1; i >= 0; i--) {
+        const w = wardens[i];
+        const d = Math.hypot(w.position.x - cx, (w.position.y + WARDEN_HEIGHT * 0.5) - cy, w.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1.5) {
+          const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1.5)));
+          if (dmg > 0) hitWarden(w, dmg);
+        }
       }
       // 圏内の起爆済みTNTを誘爆 (本家同様の連鎖。再帰回避のため短い導火線に再設定)
       if (typeof primedTNT !== 'undefined') {
@@ -2682,6 +3113,7 @@
         const isBlocked = (x, z) =>
           isBlockedAt(x, z, camera.position.y) ||
           isOverlappingCreeper(x, z, camera.position.y) ||
+          isOverlappingWarden(x, z, camera.position.y) ||
           isOverlappingPassiveMob(x, z, camera.position.y);
         if (isBlocked(camera.position.x, camera.position.z)) {
           // 壁ずり: X だけ・Z だけで通れるなら片方は進ませる
@@ -2786,6 +3218,11 @@
         // 敵Mob (クリーパー) の更新 + 個体数管理 (周囲に湧かせ遠方を消す)
         updateCreepers(dt);
         manageCreepers(dt);
+
+        // ウォーデン (最凶の敵Mob) の更新 + 個体数管理 + ソニックブームの演出
+        updateWardens(dt);
+        manageWardens(dt);
+        updateSonicBeams(dt);
 
         // 受動Mob (ブタ・村人・チキン) の徘徊 + 個体数管理
         updatePassiveMobs(dt);
@@ -2898,7 +3335,6 @@
     }
 
     animate();
-
 
 
 
