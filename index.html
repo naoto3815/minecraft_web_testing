@@ -845,6 +845,145 @@
       else if (touchesWater(x, y, z)) { waterDirty = true; }  // 水に隣接 → 水面が露出
     }
 
+    // ===== 流体の流れ込み (本家風: 隙間があれば水・溶岩が流れ込む) =====
+    // イベント駆動: 常時シミュレーションではなく、掘削/設置/爆破の瞬間にだけ更新する。
+    // フルブロック簡易モデル: 流れる流体も満杯ブロックとして表し、既存の描画をそのまま使う。
+    const WATER_FLOW_RANGE = 7;    // 水源から水平に広がる最大距離 (本家準拠)
+    const LAVA_FLOW_RANGE  = 3;    // 溶岩は地上で3マスまで (本家準拠)
+    const FLUID_FLOW_CAP   = 4000; // 1イベントで処理するセル数の上限 (海の全掘りなどの暴走防止)
+    const NEIGHBORS6 = [[0,1,0],[0,-1,0],[1,0,0],[-1,0,0],[0,0,1],[0,0,-1]];
+
+    // 流れて生まれた流体だけがメタ(源からの距離)を持つ。メタの無い流体ブロックは
+    // 「無限の水源」とみなす — 地形生成の海/溶岩湖や、プレイヤーが設置した流体。
+    // これにより海・湖は掘っても枯れない。
+    const fluidMeta = new Map();   // key -> { dist }
+
+    function fluidIndexAt(k) {
+      const e = blocks.get(k);
+      if (!e) return -1;
+      return (e.typeIndex === WATER_INDEX || e.typeIndex === LAVA_INDEX) ? e.typeIndex : -1;
+    }
+    function isFluidKey(k) { return fluidIndexAt(k) !== -1; }
+    function fluidDistAt(k) { const m = fluidMeta.get(k); return m ? m.dist : 0; } // メタ無し=源(0)
+
+    // (x,y,z) に流体 ti を満たす。水↔溶岩が接する場合は固体化する (本家準拠)。
+    // 戻り値: 'fluid'=流体を置いた / 'solid'=固体化した / false=置けなかった
+    function fillFluid(x, y, z, ti, dist) {
+      const k = key(x, y, z);
+      if (blocks.has(k)) return false;  // 既に何かある
+      if (ti === LAVA_INDEX) {
+        // 流れてきた溶岩が水に触れる → 流体の先端は石になる (本家: 流れる溶岩+水=丸石/石)
+        for (const [dx, dy, dz] of NEIGHBORS6) {
+          if (fluidIndexAt(key(x + dx, y + dy, z + dz)) === WATER_INDEX) {
+            addBlock(x, y, z, STONE_INDEX);
+            recordEdit(x, y, z, STONE_INDEX);
+            return 'solid';
+          }
+        }
+      } else if (ti === WATER_INDEX) {
+        // 流れてきた水が溶岩に触れる → 隣の溶岩を固体化 (源=黒曜石 / 流れ=石)、水自身は流れ続ける
+        for (const [dx, dy, dz] of NEIGHBORS6) {
+          const nk = key(x + dx, y + dy, z + dz);
+          if (fluidIndexAt(nk) === LAVA_INDEX) {
+            const solid = fluidMeta.has(nk) ? STONE_INDEX : OBSIDIAN_INDEX;
+            removeBlock(x + dx, y + dy, z + dz);
+            fluidMeta.delete(nk);
+            addBlock(x + dx, y + dy, z + dz, solid);
+            recordEdit(x + dx, y + dy, z + dz, solid);
+          }
+        }
+      }
+      addBlock(x, y, z, ti);
+      fluidMeta.set(k, { dist });
+      recordEdit(x, y, z, ti);
+      return 'fluid';
+    }
+
+    // 種となる流体セル群から前方フラッド: 真下が空なら落下(距離0で無制限)、
+    // 下が埋まっていれば水平に1マスずつ広がる(距離+1, RANGE まで)。
+    function flowFrom(seedKeys) {
+      const queue = [];
+      for (const k of seedKeys) if (isFluidKey(k)) queue.push(k);
+      let head = 0, processed = 0;
+      while (head < queue.length && processed < FLUID_FLOW_CAP) {
+        const k = queue[head++];
+        const ti = fluidIndexAt(k);
+        if (ti === -1) continue;  // 既に固化/消失した
+        processed++;
+        const ci = k.indexOf(','), cj = k.indexOf(',', ci + 1);
+        const x = +k.slice(0, ci), y = +k.slice(ci + 1, cj), z = +k.slice(cj + 1);
+        // 1) 真下が空 → 落下 (距離リセット)。落下できるなら横へは広げない。
+        const belowK = key(x, y - 1, z);
+        if (!blocks.has(belowK)) {
+          if (fillFluid(x, y - 1, z, ti, 0) === 'fluid') queue.push(belowK);
+          continue;
+        }
+        // 2) 下が埋まっている → 水平に広がる
+        const range = (ti === WATER_INDEX) ? WATER_FLOW_RANGE : LAVA_FLOW_RANGE;
+        const d = fluidDistAt(k);
+        if (d < range) {
+          for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nk = key(x + dx, y, z + dz);
+            if (blocks.has(nk)) continue;
+            if (fillFluid(x + dx, y, z + dz, ti, d + 1) === 'fluid') queue.push(nk);
+          }
+        }
+      }
+    }
+
+    // 掘って空いた(x,y,z)の周囲に流体があれば流れ込ませる
+    function triggerFluidFlow(x, y, z) {
+      const seeds = [];
+      for (const [dx, dy, dz] of NEIGHBORS6) {
+        const nk = key(x + dx, y + dy, z + dz);
+        if (isFluidKey(nk)) seeds.push(nk);
+      }
+      if (seeds.length) flowFrom(seeds);
+    }
+
+    // 流れる流体は、源(または自分より源に近い流体)から供給され続ける場合のみ存続する。
+    function isFluidSupported(k) {
+      const ci = k.indexOf(','), cj = k.indexOf(',', ci + 1);
+      const x = +k.slice(0, ci), y = +k.slice(ci + 1, cj), z = +k.slice(cj + 1);
+      const ti = fluidIndexAt(k);
+      if (ti === -1) return false;
+      // 真上に同種流体 → 落下で供給される
+      if (fluidIndexAt(key(x, y + 1, z)) === ti) return true;
+      // 水平に「自分より源に近い」同種流体 → 供給される
+      const d = fluidDistAt(k);
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nk = key(x + dx, y, z + dz);
+        if (fluidIndexAt(nk) === ti && fluidDistAt(nk) < d) return true;
+      }
+      return false;
+    }
+
+    // 流体が消えたことで支えを失った「流れる流体」を連鎖的に引かせる (源は対象外で枯れない)
+    function recedeFluidAround(x, y, z) {
+      const queue = [];
+      for (const [dx, dy, dz] of NEIGHBORS6) {
+        const nk = key(x + dx, y + dy, z + dz);
+        if (fluidMeta.has(nk)) queue.push(nk);
+      }
+      let head = 0, processed = 0;
+      while (head < queue.length && processed < FLUID_FLOW_CAP) {
+        const k = queue[head++];
+        if (!fluidMeta.has(k)) continue;        // 既に除去済み
+        if (!isFluidKey(k)) { fluidMeta.delete(k); continue; }
+        processed++;
+        if (isFluidSupported(k)) continue;      // まだ供給あり → 残す
+        const ci = k.indexOf(','), cj = k.indexOf(',', ci + 1);
+        const bx = +k.slice(0, ci), by = +k.slice(ci + 1, cj), bz = +k.slice(cj + 1);
+        removeBlock(bx, by, bz);
+        fluidMeta.delete(k);
+        recordEdit(bx, by, bz, -1);
+        for (const [dx, dy, dz] of NEIGHBORS6) {  // 隣の流れる流体を再評価
+          const nk = key(bx + dx, by + dy, bz + dz);
+          if (fluidMeta.has(nk)) queue.push(nk);
+        }
+      }
+    }
+
     // ヘルパー: InstancedMesh の hit から (x, y, z) を取り出す
     function blockFromHit(hit) {
       const ti = hit.object.userData.typeIndex;
@@ -1645,6 +1784,7 @@
             inventory[bi]--;
             updateHotbar();
             startHandSwing();
+            if (bi === WATER_INDEX || bi === LAVA_INDEX) flowFrom([key(px, py, pz)]);  // 設置した流体が流れ出す
           }
         }
       }
@@ -2531,12 +2671,25 @@
             if (d > EXPLOSION_RADIUS) continue;
             if (Math.random() < 1 - d / EXPLOSION_RADIUS) {
               const bx = Math.round(cx + dx), by = Math.round(cy + dy), bz = Math.round(cz + dz);
+              const wasFluid = isFluidKey(key(bx, by, bz));
               removeBlock(bx, by, bz);
+              fluidMeta.delete(key(bx, by, bz));
               recordEdit(bx, by, bz, -1);  // クレーターを記録 (戻っても残る)
+              if (wasFluid) recedeFluidAround(bx, by, bz);
             }
           }
         }
       }
+      // クレーター周囲の流体を流れ込ませる (本家: 水際で爆発すると水が穴へ流れる)
+      const cr = r + 1;
+      const seeds = [];
+      for (let dx = -cr; dx <= cr; dx++)
+        for (let dy = -cr; dy <= cr; dy++)
+          for (let dz = -cr; dz <= cr; dz++) {
+            const sk = key(Math.round(cx + dx), Math.round(cy + dy), Math.round(cz + dz));
+            if (isFluidKey(sk)) seeds.push(sk);
+          }
+      if (seeds.length) flowFrom(seeds);
       // エフェクト
       spawnExplosionParticles(cx, cy, cz);
       playExplosionSound();
@@ -3444,6 +3597,7 @@
           inventory[bi]--;
           updateHotbar();
           startHandSwing();
+          if (bi === WATER_INDEX || bi === LAVA_INDEX) flowFrom([key(px, py, pz)]);  // 設置した流体が流れ出す
         }
       }, { passive: false });
     }
@@ -3642,10 +3796,14 @@
             breakBarEl.style.display = 'block';
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
             if (breakProgress >= hardness) {
+              const wasFluid = (info.typeIndex === WATER_INDEX || info.typeIndex === LAVA_INDEX);
               inventory[info.typeIndex]++;
               updateHotbar();
               removeBlock(info.x, info.y, info.z);
+              fluidMeta.delete(info.posKey);
               recordEdit(info.x, info.y, info.z, -1);  // 破壊を記録 (戻っても穴は残る)
+              if (wasFluid) recedeFluidAround(info.x, info.y, info.z);  // 源を壊したら下流が引く
+              triggerFluidFlow(info.x, info.y, info.z);                 // 空いた穴へ流れ込む
               breakTargetKey = null;
               breakTargetType = null;
               breakProgress = 0;
