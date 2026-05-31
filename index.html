@@ -2183,6 +2183,7 @@
     const WARDEN_MELEE_RANGE = 2.8;      // 近接攻撃の届く距離 (体が大きいのでリーチ長め)
     const WARDEN_MELEE_DAMAGE = 16;      // 近接の一撃 (満タンHP20をほぼ持っていく)
     const WARDEN_MELEE_COOLDOWN = 1.1;   // 近接の間隔(秒)
+    const WARDEN_RETALIATE_DURATION = 6; // モブに攻撃されたら、この秒数だけそのモブを優先標的にして反撃する
     const WARDEN_SONIC_MIN = 6;          // この距離以上でソニックブームを使う
     const WARDEN_SONIC_MAX = 30;         // この距離以内でソニックブーム
     const WARDEN_SONIC_DAMAGE = 8;       // ソニックブーム (防御無視)
@@ -2243,6 +2244,8 @@
       group.userData.sonicCharge = 0;   // >0 のときチャージ中(動けない)
       group.userData.heartTimer = 0;
       group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+      group.userData.targetMob = null;     // 反撃対象のモブ (なければプレイヤーを狙う)
+      group.userData.retaliateTimer = 0;   // 反撃の残り時間(秒)
       scene.add(group);
       wardens.push(group);
     }
@@ -2264,9 +2267,14 @@
     }
 
     // クリック攻撃: ダメージ → フラッシュ → 0で死亡
-    function hitWarden(group, damage) {
+    function hitWarden(group, damage, attacker) {
       group.userData.hp -= (damage || 4);
       group.userData.hitFlash = 0.5;
+      // モブに殴られたら、そのモブを標的にして一定時間 反撃する
+      if (attacker && attacker.parent) {
+        group.userData.targetMob = attacker;
+        group.userData.retaliateTimer = WARDEN_RETALIATE_DURATION;
+      }
       const d = _wardenDist(group);
       if (group.userData.hp <= 0) { playWardenSound('death', d); killWarden(group, true); }
       else playWardenSound('hurt', d);
@@ -2412,6 +2420,42 @@
         // クールダウン進行
         ud.meleeCd = Math.max(0, ud.meleeCd - dt);
         ud.sonicCd = Math.max(0, ud.sonicCd - dt);
+
+        // --- モブへの反撃: 自分を攻撃してきたモブを一定時間 優先的に狙う ---
+        if (ud.retaliateTimer > 0) ud.retaliateTimer -= dt;
+        let tm = ud.targetMob;
+        // 対象が消滅 / 撃破 / 時間切れ なら標的解除してプレイヤーへ戻る
+        if (tm && (!tm.parent || tm.userData.hp <= 0 || ud.retaliateTimer <= 0)) {
+          tm = ud.targetMob = null;
+        }
+        if (tm) {
+          const mdx = tm.position.x - w.position.x;
+          const mdz = tm.position.z - w.position.z;
+          const mdy = tm.position.y - w.position.y;
+          const mhoriz = Math.sqrt(mdx * mdx + mdz * mdz) || 0.0001;
+          const mdist = Math.sqrt(mhoriz * mhoriz + mdy * mdy);
+          w.rotation.y = Math.atan2(mdx, mdz) + WARDEN_FACING_OFFSET;  // モブの方を向く
+          if (mdist < WARDEN_MELEE_RANGE && Math.abs(mdy) < 3) {
+            // 近接圏: モブを殴る (一撃が重いので大抵は即撃破 = 本家準拠)
+            if (ud.meleeCd <= 0) {
+              hitPassiveMob(tm, WARDEN_MELEE_DAMAGE);
+              ud.meleeCd = WARDEN_MELEE_COOLDOWN;
+              playWardenSound('roar', _wardenDist(w));
+              w.scale.setScalar(1.1);
+              setTimeout(() => { if (w.parent) w.scale.setScalar(1); }, 120);
+            }
+          } else {
+            // 接近: モブへ直進 (崖・深い水は避ける)
+            const mnx = mdx / mhoriz, mnz = mdz / mhoriz;
+            const newX = w.position.x + mnx * WARDEN_SPEED * dt;
+            const newZ = w.position.z + mnz * WARDEN_SPEED * dt;
+            const newY = creeperGroundY(newX, newZ);
+            if (newY !== null && newY - w.position.y <= WARDEN_STEP_HEIGHT && waterDepthAt(newX, newZ) < MOB_DEEP_WATER) {
+              w.position.x = newX; w.position.z = newZ; w.position.y = newY;
+            }
+          }
+          continue;  // 反撃中はプレイヤーを無視
+        }
 
         // 常にプレイヤーの方を向く (視界に頼らず追跡)
         w.rotation.y = Math.atan2(dx, dz) + WARDEN_FACING_OFFSET;
@@ -3195,7 +3239,7 @@
               m.rotation.y = ud.heading + def.facing;
               if (ud.attackCd <= 0) {
                 ud.attackCd = PMOB_WARDEN_ATTACK_COOLDOWN;
-                hitWarden(foe, PMOB_WARDEN_ATTACK_DAMAGE);
+                hitWarden(foe, PMOB_WARDEN_ATTACK_DAMAGE, m);
                 if (def.hop) ud.stepHopT = SLIME_STEP_HOP_DUR;
               }
               continue;
@@ -4062,7 +4106,6 @@
     }
 
     animate();
-
 
 
 
