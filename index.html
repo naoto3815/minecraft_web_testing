@@ -75,8 +75,16 @@
       color: white; font-size: 11px; font-weight: bold;
       text-shadow: 0 0 3px black;
     }
-    #breathbar {
+    #armorinfo {
       position: absolute; top: 64px; right: 12px;
+      width: 200px; box-sizing: border-box;
+      background: rgba(0,0,0,0.5); border-radius: 9px;
+      color: #fff; font-size: 11px; font-weight: bold;
+      padding: 3px 0; text-align: center; text-shadow: 0 0 3px black;
+      pointer-events: none; display: none;
+    }
+    #breathbar {
+      position: absolute; top: 88px; right: 12px;
       width: 200px; height: 14px;
       background: rgba(0,0,0,0.5); border-radius: 7px;
       overflow: hidden; pointer-events: none; display: none;
@@ -92,6 +100,14 @@
       background: rgba(0,0,0,0.5); border-radius: 3px;
       overflow: hidden; display: none; pointer-events: none;
     }
+    #toast {
+      position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.65); color: #fff;
+      padding: 8px 18px; border-radius: 8px; font-size: 14px;
+      pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 60;
+      white-space: nowrap;
+    }
+    #toast.show { opacity: 1; }
     #breakfill { height: 100%; background: white; width: 0%; }
     #damage-flash {
       position: absolute; inset: 0;
@@ -192,20 +208,20 @@
       pointer-events: auto; font-family: inherit;
     }
     #craftbtn:hover { background: rgba(255,255,255,0.18); }
-    #craftpanel, #furnacepanel {
+    #craftpanel, #furnacepanel, #chestpanel {
       position: absolute; inset: 0; z-index: 100; display: none;
       background: rgba(0,0,0,0.72);
       align-items: center; justify-content: center; pointer-events: auto;
     }
-    #craftpanel .panel, #furnacepanel .panel {
+    #craftpanel .panel, #furnacepanel .panel, #chestpanel .panel {
       background: #2b2b2b; border: 2px solid #888; border-radius: 10px;
       padding: 16px 20px 20px; max-width: 580px; width: 90%;
       max-height: 80vh; overflow: auto; color: #fff;
       font-family: sans-serif;
     }
-    #craftpanel h2, #furnacepanel h2 { margin: 0 0 2px; font-size: 20px; }
-    #craftpanel .hint, #furnacepanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
-    #craftpanel .grid, #furnacepanel .grid {
+    #craftpanel h2, #furnacepanel h2, #chestpanel h2 { margin: 0 0 2px; font-size: 20px; }
+    #craftpanel .hint, #furnacepanel .hint, #chestpanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
+    #craftpanel .grid, #furnacepanel .grid, #chestpanel .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px;
     }
     .recipe {
@@ -221,12 +237,12 @@
     .recipe.owned { opacity: 0.55; cursor: default; }
     .recipe.owned:hover { background: #3a3a3a; }
     .recipe.owned .rcost { color: #9fe6c4; }
-    #craftclose, #furnaceclose {
+    #craftclose, #furnaceclose, #chestclose {
       float: right; cursor: pointer; border: none;
       background: #555; color: #fff; border-radius: 5px;
       padding: 2px 11px; font-size: 18px; line-height: 1.3;
     }
-    #craftclose:hover, #furnaceclose:hover { background: #777; }
+    #craftclose:hover, #furnaceclose:hover, #chestclose:hover { background: #777; }
 
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
@@ -287,7 +303,9 @@
 
   <div id="hpbar"><div id="hpfill"></div><span id="hptext">HP 20 / 20</span></div>
   <div id="hungerbar"><div id="hungerfill"></div><span id="hungertext">🍗 20 / 20</span></div>
+  <div id="armorinfo"></div>
   <div id="breathbar"><div id="breathfill"></div></div>
+  <div id="toast"></div>
   <div id="breakbar"><div id="breakfill"></div></div>
   <div id="hotbar"></div>
   <div id="damage-flash"></div>
@@ -362,6 +380,34 @@
         `<rect x='5' y='10' width='2' height='3' fill='#ff7a1c'/><rect x='8' y='9' width='2' height='4' fill='#ffae3d'/>` +
         `<rect x='2' y='2' width='12' height='3' fill='#9b9b9b'/></svg>`);
     }
+    // ベッドテクスチャ: 赤い毛布 + 白い枕
+    function bedTexURI() {
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<rect width='16' height='16' fill='#8a5a2b'/>` +
+        `<rect x='1' y='1' width='14' height='14' fill='#c0392b'/>` +
+        `<rect x='1' y='1' width='14' height='5' fill='#ececec'/>` +
+        `<rect x='1' y='6' width='14' height='2' fill='#96281b'/></svg>`);
+    }
+    // 耕地テクスチャ: 暗い土に畝(うね)の筋
+    function farmlandTexURI() {
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<rect width='16' height='16' fill='#5d3a1c'/>` +
+        `<rect x='0' y='2' width='16' height='2' fill='#4a2d14'/>` +
+        `<rect x='0' y='7' width='16' height='2' fill='#4a2d14'/>` +
+        `<rect x='0' y='12' width='16' height='2' fill='#4a2d14'/></svg>`);
+    }
+    // チェストテクスチャ: 木箱 + 金具
+    function chestTexURI() {
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<rect width='16' height='16' fill='#7a5424'/>` +
+        `<rect x='1' y='1' width='14' height='14' fill='#9a6b2f'/>` +
+        `<rect x='1' y='6' width='14' height='1.6' fill='#6b4a1e'/>` +
+        `<rect x='6.7' y='5' width='2.6' height='4' rx='0.6' fill='#c9c9c9'/>` +
+        `<rect x='7.5' y='6.4' width='1' height='1.4' fill='#555'/></svg>`);
+    }
     const blockTypes = [
       { name: '草',     color: 0x4CAF50, tex: GRASS_TEX,                icon: 'textures/grass_top.png', hardness: 0.4 },
       { name: '土',     color: 0x8B5A2B, tex: 'textures/dirt.png',     hardness: 0.5 },
@@ -382,6 +428,12 @@
       { name: 'ダイヤ鉱石', color: 0x9E9E9E, tex: oreTexURI('#4aedd9'), icon: oreTexURI('#4aedd9'), hardness: 2.2, cap: 10000 },
       // かまど (クラフトで作成・設置して右クリックで精錬)
       { name: 'かまど',     color: 0x8A8A8A, tex: furnaceTexURI(), icon: furnaceTexURI(), hardness: 1.8, cap: 2000 },
+      // ベッド (右クリックで就寝: 夜スキップ + リスポーン地点設定)
+      { name: 'ベッド',     color: 0xC0392B, tex: bedTexURI(), icon: bedTexURI(), hardness: 0.4, cap: 2000 },
+      // 耕地 (クワで土/草を耕すと出来る。種をまける)
+      { name: '耕地',       color: 0x5D3A1C, tex: farmlandTexURI(), icon: farmlandTexURI(), hardness: 0.5, cap: 5000 },
+      // チェスト (右クリックでアイテム保管)
+      { name: 'チェスト',   color: 0x9A6B2F, tex: chestTexURI(), icon: chestTexURI(), hardness: 1.0, cap: 2000 },
     ];
     let selectedSlot = 0;       // ホットバー(所持品リスト)内の選択位置
     let craftingOpen = false;   // クラフトメニュー表示中フラグ
@@ -392,6 +444,10 @@
     const GOLD_ORE_INDEX    = blockTypes.findIndex((b) => b.name === '金鉱石');
     const DIAMOND_ORE_INDEX = blockTypes.findIndex((b) => b.name === 'ダイヤ鉱石');
     const FURNACE_INDEX     = blockTypes.findIndex((b) => b.name === 'かまど');
+    const BED_INDEX         = blockTypes.findIndex((b) => b.name === 'ベッド');
+    const FARMLAND_INDEX    = blockTypes.findIndex((b) => b.name === '耕地');
+    const CHEST_INDEX       = blockTypes.findIndex((b) => b.name === 'チェスト');
+    const GRASS_INDEX = 0, DIRT_INDEX = 1;
 
     // マテリアル生成: 単一テクスチャ or 6面別テクスチャ
     const textureLoader = new THREE.TextureLoader();
@@ -461,6 +517,9 @@
       } else if (type === 'shovel') {
         g = `<rect x='10.5' y='4' width='3' height='12' rx='1' fill='${handle}'/>` +
             `<path d='M8 13 Q8 22 12 22 Q16 22 16 13 Q12 15 8 13 Z' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>`;
+      } else if (type === 'hoe') {
+        g = `<rect x='10.5' y='5' width='3' height='16' rx='1' fill='${handle}'/>` +
+            `<path d='M11 4 L19 4 Q20.5 4 20 7 L18 7 L13 7 Z' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>`;
       } else { // sword
         g = `<rect x='10.7' y='2' width='2.6' height='13' rx='0.6' fill='${head}' stroke='${stroke}' stroke-width='0.6'/>` +
             `<rect x='7.5' y='14.5' width='9' height='2.4' rx='1' fill='${handle}'/>` +
@@ -482,8 +541,9 @@
 
     const _toolTypes = [
       { type: 'pickaxe', name: 'ツルハシ', blockNames: ['石', 'レンガ', '黒曜石', '石炭鉱石', '鉄鉱石', '金鉱石', 'ダイヤ鉱石', 'かまど'] },
-      { type: 'axe',     name: '斧',       blockNames: ['木材', '葉'] },
-      { type: 'shovel',  name: 'シャベル', blockNames: ['土', '砂', '草', '雪'] },
+      { type: 'axe',     name: '斧',       blockNames: ['木材', '葉', 'チェスト', 'ベッド'] },
+      { type: 'shovel',  name: 'シャベル', blockNames: ['土', '砂', '草', '雪', '耕地'] },
+      { type: 'hoe',     name: 'クワ',     blockNames: [] },   // 右クリックで土/草を耕す
       { type: 'sword',   name: '剣',       blockNames: [] },
     ];
     const _toolTiers = [
@@ -513,6 +573,43 @@
     const toolById = {};
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
     const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
+
+    // ===== 防具 — 本家準拠の被ダメージ軽減 (革=全身28% / 鉄=全身60% 相当) =====
+    // 作ると自動で装備される。上位 (鉄) を持っていればそちらが優先。
+    function armorIcon(color) {
+      return svgDataURI(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" +
+        `<path d='M7 3 L9.5 3 Q12 5 14.5 3 L17 3 L20 6 L18 9.5 L17 8.5 L17 21 L7 21 L7 8.5 L6 9.5 L4 6 Z' ` +
+        `fill='${color}' stroke='#1a1a1a' stroke-width='0.7'/></svg>`);
+    }
+    const ARMOR_DEFS = [
+      { id: 'leather_armor', name: '革の防具', reduce: 0.28, costMatId: 'leather', costQty: 8, icon: armorIcon('#8a5a2b') },
+      { id: 'iron_armor',    name: '鉄の防具', reduce: 0.60, costMatId: 'iron',    costQty: 8, icon: armorIcon('#d8d8d8') },
+    ];
+    const ownedArmor = {};   // id -> true
+    function currentArmorReduce() {
+      let best = 0;
+      for (const a of ARMOR_DEFS) if (ownedArmor[a.id] && a.reduce > best) best = a.reduce;
+      return best;
+    }
+    function updateArmorHUD() {
+      const el = document.getElementById('armorinfo');
+      const r = currentArmorReduce();
+      if (r <= 0) { el.style.display = 'none'; return; }
+      const a = ARMOR_DEFS.filter((d) => ownedArmor[d.id]).sort((x, y) => y.reduce - x.reduce)[0];
+      el.textContent = `🛡️ ${a.name}（被ダメージ -${Math.round(r * 100)}%）`;
+      el.style.display = 'block';
+    }
+    function canCraftArmor(a) { return !ownedArmor[a.id] && materials[a.costMatId] >= a.costQty; }
+    function craftArmor(a) {
+      if (!canCraftArmor(a)) return false;
+      materials[a.costMatId] -= a.costQty;
+      ownedArmor[a.id] = true;
+      updateArmorHUD();
+      updateHotbar();
+      refreshCraftPanel();
+      return true;
+    }
 
     // 松明アイコン (棒 + 炎)
     function torchIconURI() {
@@ -555,6 +652,10 @@
       { id: 'diamond',  name: 'ダイヤモンド', color: 0x4AEDD9, label: 'ダ' },
       // 松明 (設置すると灯りになり、周囲8マスに敵Mobが湧かなくなる)
       { id: 'torch',    name: '松明',       color: 0xF2A33C, label: '松', icon: torchIconURI() },
+      // 農業 (種→耕地にまく→小麦を収穫→パン。小麦と種は動物の繁殖にも使う)
+      { id: 'seeds',    name: '種',         color: 0x7FA650, label: '種' },
+      { id: 'wheat',    name: '小麦',       color: 0xD9B44A, label: '麦' },
+      { id: 'bread',    name: 'パン',       color: 0xB8803C, label: 'パ', food: 5 },
     ];
     function matIcon(m) {
       const hex = '#' + m.color.toString(16).padStart(6, '0');
@@ -708,7 +809,18 @@
       { id: 'torch', name: '松明 ×4', icon: torchIconURI(),
         costs: [{ kind: 'material', id: 'coal', qty: 1 }, { kind: 'block', i: blockIndexByName['木材'], qty: 1 }],
         make() { materials.torch += 4; } },
+      { id: 'bed', name: 'ベッド', icon: bedTexURI(),
+        costs: [{ kind: 'material', id: 'leather', qty: 3 }, { kind: 'block', i: blockIndexByName['木材'], qty: 3 }],
+        make() { inventory[blockIndexByName['ベッド']] += 1; } },
+      { id: 'chest', name: 'チェスト', icon: chestTexURI(),
+        costs: [{ kind: 'block', i: blockIndexByName['木材'], qty: 8 }],
+        make() { inventory[blockIndexByName['チェスト']] += 1; } },
+      { id: 'bread', name: 'パン', icon: null,
+        costs: [{ kind: 'material', id: 'wheat', qty: 3 }],
+        make() { materials.bread += 1; } },
     ];
+    // パンのアイコンは素材定義から流用 (MATERIAL_DEFS 初期化後に解決)
+    ITEM_RECIPES.find((r) => r.id === 'bread').icon = materialById.bread.icon;
     function recipeCostOwned(c) { return c.kind === 'material' ? materials[c.id] : inventory[c.i]; }
     function recipeCostName(c)  { return c.kind === 'material' ? materialById[c.id].name : blockTypes[c.i].name; }
     function canCraftItem(r) { return r.costs.every((c) => recipeCostOwned(c) >= c.qty); }
@@ -758,6 +870,23 @@
         const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
         card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
         if (!owned && ok) card.addEventListener('click', () => craftTool(t));
+        craftGridEl.appendChild(card);
+      });
+      // 防具 (1回だけ作れて自動装備)
+      ARMOR_DEFS.forEach((a) => {
+        const owned = !!ownedArmor[a.id];
+        const ok = canCraftArmor(a);
+        const card = document.createElement('div');
+        card.className = 'recipe' + (owned ? ' owned' : (ok ? '' : ' locked'));
+        const costLine = owned
+          ? '装備中'
+          : `${materialById[a.costMatId].name} × ${a.costQty}（所持 ${materials[a.costMatId]}）`;
+        const img = document.createElement('img'); img.src = a.icon; img.alt = a.name;
+        const nm = document.createElement('div'); nm.className = 'rname';
+        nm.textContent = `${a.name}（-${Math.round(a.reduce * 100)}%）`;
+        const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (!owned && ok) card.addEventListener('click', () => craftArmor(a));
         craftGridEl.appendChild(card);
       });
       // 素材レシピ (TNTなど。何度でも作れる)
@@ -889,6 +1018,140 @@
       }
     }
 
+    // ===== チェスト — アイテム保管 (設置位置ごとに中身を localStorage へ保存) =====
+    let chestOpen = false;
+    let currentChestKey = null;
+    const CHEST_SAVE_KEY = 'mc_chests_v1';
+    let chestData = {};   // "x,y,z" → { blocks: {typeIndex: 個数}, mats: {id: 個数}, tnt: 個数 }
+    try { chestData = JSON.parse(localStorage.getItem(CHEST_SAVE_KEY)) || {}; } catch (err) { chestData = {}; }
+    function saveChests() {
+      try { localStorage.setItem(CHEST_SAVE_KEY, JSON.stringify(chestData)); } catch (err) { /* 無視 */ }
+    }
+    function chestAt(k) {
+      if (!chestData[k]) chestData[k] = { blocks: {}, mats: {}, tnt: 0 };
+      return chestData[k];
+    }
+
+    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen; }
+
+    const chestPanelEl = document.createElement('div');
+    chestPanelEl.id = 'chestpanel';
+    chestPanelEl.innerHTML =
+      '<div class="panel"><button id="chestclose">×</button>' +
+      '<h2>チェスト</h2>' +
+      '<div class="hint">ホットバーで選択中のブロック/素材/TNTを収納できる。収納済みのアイテムはクリックで取り出す。</div>' +
+      '<div style="margin-bottom:12px; display:flex; gap:8px;">' +
+      '<button id="chestput1" style="padding:6px 12px; cursor:pointer; background:#555; color:#fff; border:1px solid #888; border-radius:5px;">選択中を1個入れる</button>' +
+      '<button id="chestputall" style="padding:6px 12px; cursor:pointer; background:#555; color:#fff; border:1px solid #888; border-radius:5px;">選択中を全部入れる</button>' +
+      '</div>' +
+      '<div class="grid" id="chestgrid"></div></div>';
+    document.body.appendChild(chestPanelEl);
+    const chestGridEl = chestPanelEl.querySelector('#chestgrid');
+    chestPanelEl.querySelector('#chestclose').addEventListener('click', () => closeChest(true));
+    chestPanelEl.addEventListener('click', (e) => { if (e.target === chestPanelEl) closeChest(true); });
+    chestPanelEl.querySelector('#chestput1').addEventListener('click', () => depositSelected(1));
+    chestPanelEl.querySelector('#chestputall').addEventListener('click', () => depositSelected(Infinity));
+
+    // 選択中アイテムをチェストへ (qty 個まで)
+    function depositSelected(qty) {
+      if (!currentChestKey) return;
+      const c = chestAt(currentChestKey);
+      const it = selectedItem();
+      if (!it) return;
+      if (it.kind === 'block') {
+        const n = Math.min(qty, inventory[it.i]);
+        if (n <= 0) return;
+        inventory[it.i] -= n;
+        c.blocks[it.i] = (c.blocks[it.i] || 0) + n;
+      } else if (it.kind === 'material') {
+        const n = Math.min(qty, materials[it.id]);
+        if (n <= 0) return;
+        materials[it.id] -= n;
+        c.mats[it.id] = (c.mats[it.id] || 0) + n;
+      } else if (it.kind === 'tnt') {
+        const n = Math.min(qty, tntCount);
+        if (n <= 0) return;
+        tntCount -= n;
+        c.tnt += n;
+      } else {
+        return;   // 道具は収納不可
+      }
+      saveChests();
+      updateHotbar();
+      refreshChestPanel();
+    }
+
+    function refreshChestPanel() {
+      if (!currentChestKey) return;
+      const c = chestAt(currentChestKey);
+      chestGridEl.innerHTML = '';
+      const addCard = (icon, name, count, onTake) => {
+        const card = document.createElement('div');
+        card.className = 'recipe';
+        const img = document.createElement('img'); img.src = icon; img.alt = name;
+        const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = name;
+        const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = `× ${count}（クリックで取り出す）`;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        card.addEventListener('click', onTake);
+        chestGridEl.appendChild(card);
+      };
+      for (const iStr in c.blocks) {
+        const i = +iStr, n = c.blocks[i];
+        if (n <= 0) continue;
+        const bt = blockTypes[i];
+        addCard(bt.icon || (typeof bt.tex === 'string' ? bt.tex : bt.tex[2]), bt.name, n, () => {
+          inventory[i] += n; delete c.blocks[i];
+          saveChests(); updateHotbar(); refreshChestPanel();
+        });
+      }
+      for (const id in c.mats) {
+        const n = c.mats[id];
+        if (n <= 0) continue;
+        addCard(materialById[id].icon, materialById[id].name, n, () => {
+          materials[id] += n; delete c.mats[id];
+          saveChests(); updateHotbar(); refreshChestPanel();
+        });
+      }
+      if (c.tnt > 0) {
+        addCard(TNT_ICON, 'TNT', c.tnt, () => {
+          tntCount += c.tnt; c.tnt = 0;
+          saveChests(); updateHotbar(); refreshChestPanel();
+        });
+      }
+      if (!chestGridEl.children.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'opacity:0.55; font-size:13px; grid-column: 1 / -1; text-align:center; padding: 12px 0;';
+        empty.textContent = '（空っぽ）';
+        chestGridEl.appendChild(empty);
+      }
+    }
+
+    function openChest(info) {
+      if (anyUIOpen()) return;
+      chestOpen = true;
+      currentChestKey = `${info.x},${info.y},${info.z}`;
+      refreshChestPanel();
+      chestPanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      mouseDown = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeChest(relock) {
+      if (!chestOpen) return;
+      chestOpen = false;
+      currentChestKey = null;
+      chestPanelEl.style.display = 'none';
+      if (usingFallback) {
+        document.body.style.cursor = 'none';
+      } else if (relock) {
+        controls.lock();
+      } else {
+        startMsg.style.display = 'block';
+      }
+    }
+
     updateHotbar();
 
     // ===== シーン・カメラ・レンダラ =====
@@ -898,6 +1161,14 @@
 
     const camera = new THREE.PerspectiveCamera(85, innerWidth / innerHeight, 0.1, 1000);  // 視野角を広めに (引いた・遠めの見え方)
     camera.position.set(96, 15, 96);  // 192×192 ワールドの中央
+    // ベッドで設定したリスポーン地点があればそこから開始 (本家準拠: 死後はベッドから復活)
+    const RESPAWN_SAVE_KEY = 'mc_respawn_v1';
+    try {
+      const rp = JSON.parse(localStorage.getItem(RESPAWN_SAVE_KEY));
+      if (rp && Number.isFinite(rp.x) && Number.isFinite(rp.y) && Number.isFinite(rp.z)) {
+        camera.position.set(rp.x, rp.y + 1.8, rp.z);
+      }
+    } catch (err) { /* 壊れたデータは無視 */ }
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(innerWidth, innerHeight);
@@ -1691,7 +1962,7 @@
     controls.addEventListener('unlock', () => {
       document.body.style.cursor = '';
       // クラフト/かまどメニューで意図的にロック解除した場合は開始画面を出さない
-      if (!usingFallback && !craftingOpen && !furnaceOpen) startMsg.style.display = 'block';
+      if (!usingFallback && !anyUIOpen()) startMsg.style.display = 'block';
     });
 
     // ===== BGM =====
@@ -1936,6 +2207,7 @@
     addEventListener('keydown', (e) => {
       // E キーでクラフトメニュー開閉。開いている間は移動入力を無視
       if (furnaceOpen) { if (e.code === 'Escape') closeFurnace(false); else if (e.code === 'KeyE') closeFurnace(true); return; }
+      if (chestOpen) { if (e.code === 'Escape') closeChest(false); else if (e.code === 'KeyE') closeChest(true); return; }
       if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
       if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
@@ -1970,7 +2242,7 @@
     });
     // マウスホイールでホットバー(所持品)を巡回
     addEventListener('wheel', (e) => {
-      if (!controls.isLocked || craftingOpen || furnaceOpen || hotbarItems.length === 0) return;
+      if (!controls.isLocked || anyUIOpen() || hotbarItems.length === 0) return;
       const dir = e.deltaY > 0 ? 1 : -1;
       selectedSlot = (selectedSlot + dir + hotbarItems.length) % hotbarItems.length;
       updateBlockInfo();
@@ -2000,7 +2272,7 @@
     const breakFillEl = document.getElementById('breakfill');
 
     addEventListener('mousedown', (e) => {
-      if (!controls.isLocked || craftingOpen || furnaceOpen) return;
+      if (!controls.isLocked || anyUIOpen()) return;
       // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
       if (e.button === 2 && tryEatSelected()) return;
       raycaster.setFromCamera(centerScreen, camera);
@@ -2014,6 +2286,7 @@
       const zombieHits = raycaster.intersectObjects(zombieColliders, false);
       const golemHits = raycaster.intersectObjects(golemColliders, false);
       const torchHits = raycaster.intersectObjects(torchClickTargets, true);
+      const cropHits = raycaster.intersectObjects(cropClickTargets, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
       const ph = passiveHits[0];
@@ -2022,6 +2295,7 @@
       const zh = zombieHits[0];
       const gh = golemHits[0];
       const th = torchHits[0];
+      const crh = cropHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
       if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
@@ -2030,12 +2304,23 @@
       if (fh && (!hit || fh.distance < hit.distance)) { hit = fh; hitType = 'fish'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
       if (th && (!hit || th.distance < hit.distance)) { hit = th; hitType = 'torch'; }
+      if (crh && (!hit || crh.distance < hit.distance)) { hit = crh; hitType = 'crop'; }
       if (!hit || hit.distance > 8) return;
-      if (e.button === 0 && hitType !== 'block' && hitType !== 'torch') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
+      if (e.button === 0 && hitType !== 'block' && hitType !== 'torch' && hitType !== 'crop') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
 
       // 松明: 左クリックで即撤去 (本家同様アイテムとして戻る)
       if (hitType === 'torch') {
         if (e.button === 0) { removeTorchByObject(hit.object); startHandSwing(); }
+        return;
+      }
+
+      // 作物: 左クリックで収穫 (成熟なら小麦+種、未成熟なら種だけ)
+      if (hitType === 'crop') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !g.userData.cropKey) g = g.parent;
+          if (g) { removeCrop(g, true); startHandSwing(); }
+        }
         return;
       }
 
@@ -2092,14 +2377,16 @@
         return;
       }
 
-      // 受動Mob (ブタ・村人): 左クリックで攻撃 (剣装備中はダメージUP)
+      // 受動Mob (ブタ・村人): 左クリックで攻撃、右クリックで餌やり (繁殖)
       if (hitType === 'passive') {
-        if (e.button === 0) {
-          let g = hit.object;
-          while (g && !passiveMobs.includes(g)) g = g.parent;
-          if (g) {
+        let g = hit.object;
+        while (g && !passiveMobs.includes(g)) g = g.parent;
+        if (g) {
+          if (e.button === 0) {
             hitPassiveMob(g, attackDamage());
             startHandSwing();
+          } else if (e.button === 2) {
+            feedPassiveMob(g);   // 小麦/種を持って右クリック → ラブモード
           }
         }
         return;
@@ -2116,6 +2403,29 @@
       } else if (e.button === 2) {
         // かまどを右クリック → 精錬メニューを開く (本家準拠の対話)
         if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }
+        // ベッドを右クリック → 就寝 (夜スキップ + リスポーン設定)
+        if (info.typeIndex === BED_INDEX) { trySleepInBed(info); return; }
+        // チェストを右クリック → 保管メニュー
+        if (info.typeIndex === CHEST_INDEX) { openChest(info); return; }
+        // クワで草/土を右クリック → 耕地にする (本家準拠)
+        const heldT = heldTool();
+        if (heldT && heldT.type === 'hoe' && (info.typeIndex === GRASS_INDEX || info.typeIndex === DIRT_INDEX)) {
+          removeBlock(info.x, info.y, info.z);
+          addBlock(info.x, info.y, info.z, FARMLAND_INDEX);
+          recordEdit(info.x, info.y, info.z, FARMLAND_INDEX);
+          startHandSwing();
+          return;
+        }
+        // 耕地に種をまく → 作物が育つ
+        const selM = selectedItem();
+        if (selM && selM.kind === 'material' && selM.id === 'seeds' && info.typeIndex === FARMLAND_INDEX) {
+          if (materials.seeds > 0 && plantCrop(info.x, info.y + 1, info.z)) {
+            materials.seeds--;
+            updateHotbar();
+            startHandSwing();
+          }
+          return;
+        }
         // 設置: ブロック or TNT
         const it = selectedItem();
         if (!it) return;
@@ -2138,7 +2448,7 @@
             startHandSwing();
           }
         } else if (it.kind === 'block') {
-          if (inventory[it.i] <= 0 || torches.has(key(px, py, pz))) return;
+          if (inventory[it.i] <= 0 || torches.has(key(px, py, pz)) || crops.has(key(px, py, pz))) return;
           const bi = it.i;
           if (addBlock(px, py, pz, bi)) {
             recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
@@ -2266,6 +2576,146 @@
           placeTorch(x, y, z, t.n ? { x: t.n.x, y: 0, z: t.n.z } : null, true);
         }
       } catch (err) { /* 壊れたデータは無視 */ }
+    })();
+
+    // ===== トースト表示 (画面下部の一時メッセージ) =====
+    const toastEl = document.getElementById('toast');
+    let toastTimer = null;
+    function showToast(msg) {
+      toastEl.textContent = msg;
+      toastEl.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+    }
+
+    // ===== ベッド — 本家準拠: 夜に右クリックで朝までスキップ + リスポーン地点を設定 =====
+    function trySleepInBed(info) {
+      // リスポーン地点はいつでも設定される (本家同様)
+      try {
+        localStorage.setItem(RESPAWN_SAVE_KEY, JSON.stringify({ x: info.x, y: info.y + 1, z: info.z }));
+      } catch (err) { /* 無視 */ }
+      if (daylightStrength() <= 0.05) {
+        timeOfDay = 0.25;   // 朝 (日の出) までスキップ
+        showToast('ぐっすり眠った。朝になった！（リスポーン地点を設定）');
+      } else {
+        showToast('リスポーン地点を設定した（眠れるのは夜だけ）');
+      }
+    }
+
+    // ===== 農業 — 本家準拠: クワで耕す → 種をまく → 成長 → 小麦を収穫 =====
+    // 作物は4段階で成長し、最終段階で収穫すると小麦+種、途中で壊すと種だけ戻る。
+    const crops = new Map();            // "x,y,z" → 作物Group
+    const cropClickTargets = [];        // レイキャスト対象 (収穫用)
+    const CROP_STAGE_TIME = 40;         // 1段階の成長秒数 (4段階 = 約2分で成熟)
+    const CROP_SAVE_KEY = 'mc_crops_v1';
+    const CROP_STAGE_STYLE = [
+      { h: 0.25, color: 0x86C95E },   // 芽
+      { h: 0.45, color: 0x6FB349 },   // 若葉
+      { h: 0.7,  color: 0x5FA13E },   // 生育
+      { h: 0.9,  color: 0xD9B44A },   // 成熟 (金色 = 小麦)
+    ];
+    const _cropPlaneGeo = new THREE.PlaneGeometry(0.9, 1);
+    _cropPlaneGeo.translate(0, 0.5, 0);   // 原点を根元に
+    let cropSaveTimer = null;
+
+    function cropMesh(stage) {
+      const st = CROP_STAGE_STYLE[stage];
+      const mat = new THREE.MeshLambertMaterial({ color: st.color, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
+      const g = new THREE.Group();
+      const p1 = new THREE.Mesh(_cropPlaneGeo, mat);
+      const p2 = new THREE.Mesh(_cropPlaneGeo, mat);
+      p2.rotation.y = Math.PI / 2;
+      g.add(p1); g.add(p2);
+      g.scale.y = st.h;
+      return g;
+    }
+
+    function plantCrop(x, y, z, stage, t, skipSave) {
+      const k = key(x, y, z);
+      if (blocks.has(k) || crops.has(k) || torches.has(k)) return false;
+      // 下が耕地でなければ植えられない
+      const below = blocks.get(key(x, y - 1, z));
+      if (!below || below.typeIndex !== FARMLAND_INDEX) return false;
+      const g = new THREE.Group();
+      g.userData.stage = stage || 0;
+      g.userData.t = t || 0;
+      g.userData.cropKey = k;
+      g.userData.visual = cropMesh(g.userData.stage);
+      g.add(g.userData.visual);
+      g.position.set(x, y - 0.5, z);   // 根元を耕地の上面に
+      scene.add(g);
+      crops.set(k, g);
+      cropClickTargets.push(g);
+      if (!skipSave) scheduleCropSave();
+      return true;
+    }
+
+    function removeCrop(g, harvest) {
+      if (harvest) {
+        const p = g.position;
+        if (g.userData.stage >= 3) {
+          // 成熟: 小麦1 + 種1〜2 (本家準拠)
+          spawnItemDrop(p.x, p.y + 0.4, p.z, 'wheat', 1);
+          spawnItemDrop(p.x, p.y + 0.4, p.z, 'seeds', 1 + Math.floor(Math.random() * 2));
+        } else {
+          spawnItemDrop(p.x, p.y + 0.4, p.z, 'seeds', 1);   // 未成熟: 種だけ戻る
+        }
+      }
+      scene.remove(g);
+      crops.delete(g.userData.cropKey);
+      const i = cropClickTargets.indexOf(g);
+      if (i !== -1) cropClickTargets.splice(i, 1);
+      scheduleCropSave();
+    }
+
+    function updateCrops(dt) {
+      for (const g of crops.values()) {
+        const ud = g.userData;
+        if (ud.stage >= 3) continue;
+        ud.t += dt;
+        const ns = Math.min(3, Math.floor(ud.t / CROP_STAGE_TIME));
+        if (ns !== ud.stage) {
+          ud.stage = ns;
+          g.remove(ud.visual);
+          ud.visual = cropMesh(ns);
+          g.add(ud.visual);
+          scheduleCropSave();
+        }
+      }
+    }
+
+    function scheduleCropSave() {
+      if (cropSaveTimer) clearTimeout(cropSaveTimer);
+      cropSaveTimer = setTimeout(() => {
+        cropSaveTimer = null;
+        try {
+          const arr = [];
+          for (const [k, g] of crops) arr.push({ k, s: g.userData.stage, t: Math.round(g.userData.t) });
+          localStorage.setItem(CROP_SAVE_KEY, JSON.stringify(arr));
+        } catch (err) { /* 無視 */ }
+      }, 1000);
+    }
+    (function loadCrops() {
+      try {
+        const raw = localStorage.getItem(CROP_SAVE_KEY);
+        if (!raw) return;
+        for (const c of JSON.parse(raw)) {
+          const [x, y, z] = c.k.split(',').map(Number);
+          // 耕地の存在チェックは植え付け時に行うが、ロード時は地形未生成なのでスキップして直接復元
+          const k = key(x, y, z);
+          if (crops.has(k)) continue;
+          const g = new THREE.Group();
+          g.userData.stage = c.s || 0;
+          g.userData.t = c.t || 0;
+          g.userData.cropKey = k;
+          g.userData.visual = cropMesh(g.userData.stage);
+          g.add(g.userData.visual);
+          g.position.set(x, y - 0.5, z);
+          scene.add(g);
+          crops.set(k, g);
+          cropClickTargets.push(g);
+        }
+      } catch (err) { /* 無視 */ }
     })();
 
     // ===== クリーパー (敵Mob) =====
@@ -4067,6 +4517,65 @@
       group.userData.fleeTimer = PMOB_FLEE_DURATION;
     }
 
+    // ===== 繁殖 — 本家準拠: 対応する食べ物を与えるとラブモード、2匹が出会うと子供が生まれる =====
+    const BREED_FOOD = { cow: 'wheat', horse: 'wheat', pig: 'wheat', rabbit: 'wheat', chicken: 'seeds' };
+    const LOVE_DURATION = 30;        // ラブモードの持続秒 (本家準拠)
+    const BREED_COOLDOWN = 60;       // 繁殖後の再繁殖までの秒数
+    const BREED_SEEK_RANGE = 8;      // 相手を探す範囲
+    const BABY_GROW_TIME = 90;       // 子供が大人になるまでの秒数
+    const BABY_SCALE = 0.45;
+
+    // ハートパーティクル (ラブモード演出)
+    const hearts = [];
+    const _heartTex = textureLoader.load(svgDataURI(
+      "<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64' viewBox='0 0 24 24'>" +
+      "<path d='M12 21 C5 15 2 11 2 7.5 C2 4.5 4.5 3 6.8 3 C8.8 3 10.8 4.2 12 6 C13.2 4.2 15.2 3 17.2 3 C19.5 3 22 4.5 22 7.5 C22 11 19 15 12 21 Z' fill='#ff4d6d'/></svg>"));
+    function spawnHearts(x, y, z) {
+      for (let i = 0; i < 3; i++) {
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: _heartTex, transparent: true, depthTest: false }));
+        sp.scale.set(0.32, 0.32, 1);
+        sp.position.set(x + (Math.random() - 0.5) * 0.6, y + Math.random() * 0.3, z + (Math.random() - 0.5) * 0.6);
+        sp.userData = { vy: 0.8 + Math.random() * 0.5, life: 1.2 };
+        scene.add(sp);
+        hearts.push(sp);
+      }
+    }
+    function updateHearts(dt) {
+      for (let i = hearts.length - 1; i >= 0; i--) {
+        const h = hearts[i];
+        h.userData.life -= dt;
+        h.position.y += h.userData.vy * dt;
+        h.material.opacity = Math.max(0, h.userData.life / 1.2);
+        if (h.userData.life <= 0) { scene.remove(h); h.material.dispose(); hearts.splice(i, 1); }
+      }
+    }
+
+    // 選択中の食べ物を与える (対応する動物 + 大人 + クールダウン明けのみ)。成功で true。
+    function feedPassiveMob(g) {
+      const ud = g.userData;
+      const foodId = BREED_FOOD[ud.def.key];
+      if (!foodId) return false;
+      const sel = selectedItem();
+      if (!sel || sel.kind !== 'material' || sel.id !== foodId || materials[foodId] <= 0) return false;
+      if (ud.babyT !== undefined && ud.babyT < BABY_GROW_TIME) return false;   // 子供には与えられない
+      if ((ud.breedCd || 0) > 0 || ud.loveTimer > 0) return false;
+      materials[foodId]--;
+      updateHotbar();
+      ud.loveTimer = LOVE_DURATION;
+      spawnHearts(g.position.x, g.position.y + ud.def.height + 0.3, g.position.z);
+      startHandSwing();
+      return true;
+    }
+
+    function spawnBabyMob(def, x, z) {
+      spawnPassiveMob(def, x, z);
+      const baby = passiveMobs[passiveMobs.length - 1];
+      if (baby && baby.userData.def === def) {
+        baby.userData.babyT = 0;
+        baby.scale.setScalar(BABY_SCALE);
+      }
+    }
+
     // ===== ドロップアイテム (撃破したモブが落とす素材。近づくと自動で拾う) =====
     const itemDrops = [];
     const ITEM_DROP_LIFETIME = 120;   // 秒で自然消滅
@@ -4193,6 +4702,13 @@
           setCreeperFlash(m, ud.hitFlash);  // 汎用フラッシュ (任意のGroupに適用可)
         }
 
+        // 子供の成長: 時間経過で大人サイズへ (本家準拠)
+        if (ud.babyT !== undefined && ud.babyT < BABY_GROW_TIME) {
+          ud.babyT += dt;
+          m.scale.setScalar(BABY_SCALE + (1 - BABY_SCALE) * Math.min(1, ud.babyT / BABY_GROW_TIME));
+        }
+        ud.breedCd = Math.max(0, (ud.breedCd || 0) - dt);
+
         // 溶岩ダメージ (全Mob共通): 触れている間、一定間隔でHPを削る
         if (posTouchingLava(m.position.x, m.position.y, m.position.z, def.height)) {
           ud.lavaTimer += dt;
@@ -4282,6 +4798,49 @@
         }
         // ウォーデンが居なくなった: aggro を解除して通常徘徊へ戻す
         if (ud.state === 'aggro') { ud.state = 'walk'; ud.stateTimer = 1 + Math.random() * 2; }
+
+        // --- ラブモード: 同種のラブモード中の相手を探して近づき、出会うと子供が生まれる ---
+        if (ud.loveTimer > 0) {
+          ud.loveTimer -= dt;
+          ud.heartCd = (ud.heartCd || 0) - dt;
+          if (ud.heartCd <= 0) {
+            ud.heartCd = 1.3;
+            spawnHearts(m.position.x, m.position.y + def.height + 0.3, m.position.z);
+          }
+          let mate = null, bestD2 = BREED_SEEK_RANGE * BREED_SEEK_RANGE;
+          for (const o of passiveMobs) {
+            if (o === m || o.userData.def !== def || !(o.userData.loveTimer > 0)) continue;
+            const ddx = o.position.x - m.position.x, ddz = o.position.z - m.position.z;
+            const dd2 = ddx * ddx + ddz * ddz;
+            if (dd2 < bestD2) { bestD2 = dd2; mate = o; }
+          }
+          if (mate) {
+            if (Math.sqrt(bestD2) <= 1.4) {
+              // 出会えた: 2匹の間に子供が生まれる
+              ud.loveTimer = 0; mate.userData.loveTimer = 0;
+              ud.breedCd = BREED_COOLDOWN; mate.userData.breedCd = BREED_COOLDOWN;
+              spawnBabyMob(def, (m.position.x + mate.position.x) / 2, (m.position.z + mate.position.z) / 2);
+              spawnHearts(m.position.x, m.position.y + def.height + 0.5, m.position.z);
+            } else {
+              // 相手の方へ歩み寄る (崖・深い水は避ける)
+              const mdx = mate.position.x - m.position.x, mdz = mate.position.z - m.position.z;
+              ud.heading = Math.atan2(mdx, mdz);
+              const ldirX = Math.sin(ud.heading), ldirZ = Math.cos(ud.heading);
+              const lnx = m.position.x + ldirX * def.speed * dt;
+              const lnz = m.position.z + ldirZ * def.speed * dt;
+              const lny = creeperGroundY(lnx, lnz);
+              const lref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
+              if (lny !== null && lny - lref <= PMOB_STEP_HEIGHT && waterDepthAt(lnx, lnz) < MOB_DEEP_WATER) {
+                m.position.x = lnx;
+                m.position.z = lnz;
+                setMobGroundTarget(ud, lny, def.hop ? SLIME_STEP_HOP_DUR : MOB_STEP_HOP_DUR);
+                m.rotation.y = ud.heading + def.facing;
+              }
+            }
+            continue;
+          }
+          // 相手が見つからない間は通常の徘徊にフォールスルー (本家同様うろうろする)
+        }
 
         ud.stateTimer -= dt;
 
@@ -4713,10 +5272,15 @@
       return true;
     }
 
-    function damagePlayer(amount, ignoreInvuln = false) {
+    function damagePlayer(amount, ignoreInvuln = false, bypassArmor = false) {
       if (playerHP <= 0) return;
       const now = clock.getElapsedTime();
       if (!ignoreInvuln && now - lastDamageTime < INVULN_DURATION) return;
+      // 防具による軽減 (本家準拠: 飢餓/溺れ/落下/奈落には効かない)
+      if (!bypassArmor) {
+        const r = currentArmorReduce();
+        if (r > 0) amount = Math.max(1, Math.round(amount * (1 - r)));
+      }
       playerHP = Math.max(0, playerHP - amount);
       lastDamageTime = now;
       timeSinceDamage = 0;  // 回復クールタイムをリセット
@@ -4858,7 +5422,7 @@
       placeBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!controls.isLocked || craftingOpen || furnaceOpen) return;
+        if (!controls.isLocked || anyUIOpen()) return;
         if (tryEatSelected()) return;  // 食料を選択中なら食べる
         raycaster.setFromCamera(centerScreen, camera);
         const hits = raycaster.intersectObjects(instancedMeshes, false);
@@ -4866,6 +5430,8 @@
         const info = blockFromHit(hits[0]);
         if (!info) return;
         if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }  // かまどをタップ → 精錬メニュー
+        if (info.typeIndex === BED_INDEX) { trySleepInBed(info); return; }   // ベッドをタップ → 就寝
+        if (info.typeIndex === CHEST_INDEX) { openChest(info); return; }     // チェストをタップ → 保管
         const it = selectedItem();
         if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
         const bi = it.i;
@@ -4890,7 +5456,7 @@
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);  // フレーム飛び対策
 
-      if (controls.isLocked && !craftingOpen && !furnaceOpen) {
+      if (controls.isLocked && !anyUIOpen()) {
         const fwd = (move.f ? 1 : 0) - (move.b ? 1 : 0);
         const side = (move.r ? 1 : 0) - (move.l ? 1 : 0);
 
@@ -4972,7 +5538,7 @@
 
         // 奈落落下: y < VOID_Y で即死
         if (camera.position.y < VOID_Y && playerHP > 0) {
-          damagePlayer(PLAYER_MAX_HP, true);
+          damagePlayer(PLAYER_MAX_HP, true, true);
         }
 
         // 溶岩ダメージ: 溶岩に触れている間、一定間隔で継続ダメージ
@@ -4994,7 +5560,7 @@
             drownTimer += dt;
             if (drownTimer >= DROWN_INTERVAL) {
               drownTimer = 0;
-              damagePlayer(DROWN_DAMAGE, true);
+              damagePlayer(DROWN_DAMAGE, true, true);
             }
           }
         } else {
@@ -5009,7 +5575,7 @@
             const fallDist = fallStartY - camera.position.y;
             if (fallDist > FALL_SAFE_HEIGHT && !isBodyInWater()) {
               const dmg = Math.floor((fallDist - (FALL_SAFE_HEIGHT - 1)) * 2);
-              damagePlayer(dmg, true);
+              damagePlayer(dmg, true, true);
             }
             fallStartY = null;
           }
@@ -5056,6 +5622,10 @@
         // 撃破モブが落とした素材アイテムの落下・回転・拾得
         updateItemDrops(dt);
 
+        // 作物の成長 + 繁殖ハートの演出
+        updateCrops(dt);
+        updateHearts(dt);
+
         // 起爆中TNTの導火線進行 + 爆発
         updatePrimedTNT(dt);
 
@@ -5080,7 +5650,7 @@
           starveTimer += dt;
           if (starveTimer >= STARVE_INTERVAL) {
             starveTimer = 0;
-            damagePlayer(1, true);
+            damagePlayer(1, true, true);
           }
         } else {
           starveTimer = 0;
@@ -5116,8 +5686,26 @@
                 // 鉱石: 対応ティア以上のツルハシなら素材ドロップ、足りなければ何も出ない (本家準拠)
                 const heldTier = (tool && tool.type === 'pickaxe') ? TOOL_TIER_RANK[tool.tier] : 0;
                 if (heldTier >= ore.minTier) materials[ore.dropId]++;
+              } else if (info.typeIndex === FARMLAND_INDEX) {
+                inventory[DIRT_INDEX]++;   // 耕地を壊すと土に戻る (本家準拠)
               } else {
                 inventory[info.typeIndex]++;
+                // 草ブロックを壊すとまれに種 (本家の草むら相当)
+                if (info.typeIndex === GRASS_INDEX && Math.random() < 0.25) {
+                  spawnItemDrop(info.x, info.y + 0.6, info.z, 'seeds', 1);
+                }
+              }
+              // 上に作物が乗っていたら一緒に壊れる (種が落ちる)
+              const cropAbove = crops.get(key(info.x, info.y + 1, info.z));
+              if (cropAbove) removeCrop(cropAbove, true);
+              // チェストを壊したら中身はプレイヤーの持ち物へ戻る
+              if (info.typeIndex === CHEST_INDEX && chestData[info.posKey]) {
+                const c = chestData[info.posKey];
+                for (const iStr in c.blocks) inventory[+iStr] += c.blocks[iStr];
+                for (const id in c.mats) materials[id] += c.mats[id];
+                tntCount += c.tnt || 0;
+                delete chestData[info.posKey];
+                saveChests();
               }
               updateHotbar();
               removeBlock(info.x, info.y, info.z);
