@@ -58,8 +58,25 @@
       color: white; font-size: 13px; font-weight: bold;
       text-shadow: 0 0 3px black;
     }
-    #breathbar {
+    #hungerbar {
       position: absolute; top: 42px; right: 12px;
+      width: 200px; height: 18px;
+      background: rgba(0,0,0,0.5); border-radius: 9px;
+      overflow: hidden; pointer-events: none;
+    }
+    #hungerfill {
+      position: absolute; inset: 0;
+      background: linear-gradient(to right, #b35a1f, #f0a050);
+      width: 100%; transition: width 0.25s;
+    }
+    #hungertext {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-size: 11px; font-weight: bold;
+      text-shadow: 0 0 3px black;
+    }
+    #breathbar {
+      position: absolute; top: 64px; right: 12px;
       width: 200px; height: 14px;
       background: rgba(0,0,0,0.5); border-radius: 7px;
       overflow: hidden; pointer-events: none; display: none;
@@ -168,27 +185,27 @@
 
     /* クラフト */
     #craftbtn {
-      position: absolute; top: 12px; right: 12px; z-index: 30;
+      position: absolute; top: 12px; right: 224px; z-index: 30;
       background: rgba(0,0,0,0.55); color: #fff;
       border: 2px solid #888; border-radius: 6px;
       padding: 8px 12px; font-size: 14px; cursor: pointer;
       pointer-events: auto; font-family: inherit;
     }
     #craftbtn:hover { background: rgba(255,255,255,0.18); }
-    #craftpanel {
+    #craftpanel, #furnacepanel {
       position: absolute; inset: 0; z-index: 100; display: none;
       background: rgba(0,0,0,0.72);
       align-items: center; justify-content: center; pointer-events: auto;
     }
-    #craftpanel .panel {
+    #craftpanel .panel, #furnacepanel .panel {
       background: #2b2b2b; border: 2px solid #888; border-radius: 10px;
       padding: 16px 20px 20px; max-width: 580px; width: 90%;
       max-height: 80vh; overflow: auto; color: #fff;
       font-family: sans-serif;
     }
-    #craftpanel h2 { margin: 0 0 2px; font-size: 20px; }
-    #craftpanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
-    #craftpanel .grid {
+    #craftpanel h2, #furnacepanel h2 { margin: 0 0 2px; font-size: 20px; }
+    #craftpanel .hint, #furnacepanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
+    #craftpanel .grid, #furnacepanel .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px;
     }
     .recipe {
@@ -204,12 +221,12 @@
     .recipe.owned { opacity: 0.55; cursor: default; }
     .recipe.owned:hover { background: #3a3a3a; }
     .recipe.owned .rcost { color: #9fe6c4; }
-    #craftclose {
+    #craftclose, #furnaceclose {
       float: right; cursor: pointer; border: none;
       background: #555; color: #fff; border-radius: 5px;
       padding: 2px 11px; font-size: 18px; line-height: 1.3;
     }
-    #craftclose:hover { background: #777; }
+    #craftclose:hover, #furnaceclose:hover { background: #777; }
 
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
@@ -269,6 +286,7 @@
   <div id="startmsg">クリックして開始<small>Escで一時停止</small></div>
 
   <div id="hpbar"><div id="hpfill"></div><span id="hptext">HP 20 / 20</span></div>
+  <div id="hungerbar"><div id="hungerfill"></div><span id="hungertext">🍗 20 / 20</span></div>
   <div id="breathbar"><div id="breathfill"></div></div>
   <div id="breakbar"><div id="breakfill"></div></div>
   <div id="hotbar"></div>
@@ -321,6 +339,29 @@
       'textures/grass_side.png',  // +Z
       'textures/grass_side.png',  // -Z
     ];
+
+    // 鉱石テクスチャ: 石の灰色ベースに鉱石色の斑点 (本家風) を SVG で動的生成
+    function oreTexURI(spotColor) {
+      const spots = [[3,3],[9,2],[5,8],[11,9],[2,11],[8,12]]
+        .map(([x,y]) => `<rect x='${x}' y='${y}' width='3' height='3' fill='${spotColor}'/>` +
+                        `<rect x='${x}' y='${y}' width='1' height='1' fill='white' fill-opacity='0.45'/>`)
+        .join('');
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<rect width='16' height='16' fill='#8f8f8f'/>` +
+        `<rect x='0' y='0' width='7' height='5' fill='#9a9a9a'/><rect x='9' y='6' width='7' height='6' fill='#868686'/>` +
+        `<rect x='2' y='10' width='5' height='6' fill='#a3a3a3'/>${spots}</svg>`);
+    }
+    // かまどテクスチャ: 灰色の石枠 + 黒い焚き口 + 炎
+    function furnaceTexURI() {
+      return 'data:image/svg+xml,' + encodeURIComponent(
+        `<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'>` +
+        `<rect width='16' height='16' fill='#8a8a8a'/>` +
+        `<rect x='1' y='1' width='14' height='14' fill='#777'/>` +
+        `<rect x='3' y='7' width='10' height='7' fill='#1c1c1c'/>` +
+        `<rect x='5' y='10' width='2' height='3' fill='#ff7a1c'/><rect x='8' y='9' width='2' height='4' fill='#ffae3d'/>` +
+        `<rect x='2' y='2' width='12' height='3' fill='#9b9b9b'/></svg>`);
+    }
     const blockTypes = [
       { name: '草',     color: 0x4CAF50, tex: GRASS_TEX,                icon: 'textures/grass_top.png', hardness: 0.4 },
       { name: '土',     color: 0x8B5A2B, tex: 'textures/dirt.png',     hardness: 0.5 },
@@ -334,11 +375,23 @@
       // 流体ブロック: 水は半透明(72%)、溶岩は自己発光 (触れるとダメージ)
       { name: '水',     color: 0x3A78C8, tex: null, icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16'%3E%3Crect width='16' height='16' fill='%233A78C8' fill-opacity='0.6'/%3E%3C/svg%3E", hardness: 0.1, matOpts: { transparent: true, opacity: 0.72, depthWrite: false, unlit: true } },
       { name: '溶岩',   color: 0xE2552B, tex: 'textures/lava.png', hardness: 0.1, matOpts: { emissive: 0xFF6A00, emissiveIntensity: 0.7, emissiveMap: true } },
+      // 鉱石ブロック (地中の狭い半径にだけ生成されるので cap でインスタンス数を絞る)
+      { name: '石炭鉱石',   color: 0x9E9E9E, tex: oreTexURI('#2e2e2e'), icon: oreTexURI('#2e2e2e'), hardness: 1.6, cap: 20000 },
+      { name: '鉄鉱石',     color: 0x9E9E9E, tex: oreTexURI('#d8af93'), icon: oreTexURI('#d8af93'), hardness: 1.8, cap: 20000 },
+      { name: '金鉱石',     color: 0x9E9E9E, tex: oreTexURI('#fcee4b'), icon: oreTexURI('#fcee4b'), hardness: 1.8, cap: 10000 },
+      { name: 'ダイヤ鉱石', color: 0x9E9E9E, tex: oreTexURI('#4aedd9'), icon: oreTexURI('#4aedd9'), hardness: 2.2, cap: 10000 },
+      // かまど (クラフトで作成・設置して右クリックで精錬)
+      { name: 'かまど',     color: 0x8A8A8A, tex: furnaceTexURI(), icon: furnaceTexURI(), hardness: 1.8, cap: 2000 },
     ];
     let selectedSlot = 0;       // ホットバー(所持品リスト)内の選択位置
     let craftingOpen = false;   // クラフトメニュー表示中フラグ
     const WATER_INDEX = blockTypes.findIndex((b) => b.name === '水');
     const LAVA_INDEX  = blockTypes.findIndex((b) => b.name === '溶岩');
+    const COAL_ORE_INDEX    = blockTypes.findIndex((b) => b.name === '石炭鉱石');
+    const IRON_ORE_INDEX    = blockTypes.findIndex((b) => b.name === '鉄鉱石');
+    const GOLD_ORE_INDEX    = blockTypes.findIndex((b) => b.name === '金鉱石');
+    const DIAMOND_ORE_INDEX = blockTypes.findIndex((b) => b.name === 'ダイヤ鉱石');
+    const FURNACE_INDEX     = blockTypes.findIndex((b) => b.name === 'かまど');
 
     // マテリアル生成: 単一テクスチャ or 6面別テクスチャ
     const textureLoader = new THREE.TextureLoader();
@@ -428,7 +481,7 @@
     );
 
     const _toolTypes = [
-      { type: 'pickaxe', name: 'ツルハシ', blockNames: ['石', 'レンガ', '黒曜石'] },
+      { type: 'pickaxe', name: 'ツルハシ', blockNames: ['石', 'レンガ', '黒曜石', '石炭鉱石', '鉄鉱石', '金鉱石', 'ダイヤ鉱石', 'かまど'] },
       { type: 'axe',     name: '斧',       blockNames: ['木材', '葉'] },
       { type: 'shovel',  name: 'シャベル', blockNames: ['土', '砂', '草', '雪'] },
       { type: 'sword',   name: '剣',       blockNames: [] },
@@ -436,7 +489,10 @@
     const _toolTiers = [
       { tier: 'wood',  name: '木の', mat: '木材', cost: 3, speed: 5,  attack: 3, head: '#C19A6B' },
       { tier: 'stone', name: '石の', mat: '石',   cost: 3, speed: 10, attack: 6, head: '#AFAFAF' },
+      // 鉄ティアは鉄インゴット(素材)で作る — 鉱石→精錬→道具 の本家ループ
+      { tier: 'iron',  name: '鉄の', matId: 'iron', cost: 3, speed: 14, attack: 8, head: '#E8E8E8' },
     ];
+    const TOOL_TIER_RANK = { wood: 1, stone: 2, iron: 3 };
     const TOOL_DEFS = [];
     _toolTiers.forEach((tier) => {
       _toolTypes.forEach((tt) => {
@@ -448,7 +504,8 @@
           speed: tier.speed,
           attack: tt.type === 'sword' ? tier.attack : 0,
           blocks: new Set(tt.blockNames.map((n) => blockIndexByName[n])),
-          costMat: blockIndexByName[tier.mat],
+          costMat: tier.matId ? null : blockIndexByName[tier.mat],
+          costMatId: tier.matId || null,   // 素材コスト (鉄インゴット等)
           costQty: tier.cost,
         });
       });
@@ -457,15 +514,31 @@
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
     const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
 
+    // 松明アイコン (棒 + 炎)
+    function torchIconURI() {
+      return svgDataURI(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" +
+        "<rect x='10.5' y='8' width='3' height='13' rx='1' fill='#6b4a2b'/>" +
+        "<rect x='9.5' y='4.5' width='5' height='4' rx='1' fill='#ffae3d'/>" +
+        "<rect x='10.7' y='2.3' width='2.6' height='2.6' rx='1' fill='#ffd66b'/>" +
+        "</svg>");
+    }
+
     // ===== 素材アイテム (モブ撃破で手に入る。ブロックとは別管理) =====
     // food を持つ素材は選択して右クリックで食べると HP 回復。
     const MATERIAL_DEFS = [
-      { id: 'porkchop',   name: '生豚肉',         color: 0xE8907E, label: '豚', food: 4 },
-      { id: 'beef',       name: '生の牛肉',       color: 0xC8554C, label: '牛', food: 4 },
+      { id: 'porkchop',   name: '生豚肉',         color: 0xE8907E, label: '豚', food: 3 },
+      { id: 'beef',       name: '生の牛肉',       color: 0xC8554C, label: '牛', food: 3 },
       { id: 'chicken',    name: '生の鶏肉',       color: 0xE7B98A, label: '鶏', food: 2 },
       { id: 'rabbitmeat', name: '生のうさぎ肉',   color: 0xE08A6E, label: '兎', food: 3 },
       { id: 'rawfish',    name: '生魚',           color: 0x6FB6C8, label: '魚', food: 2 },
-      { id: 'rottenflesh',name: '腐った肉',       color: 0x6E8A4C, label: '腐', food: 1 },
+      { id: 'rottenflesh',name: '腐った肉',       color: 0x6E8A4C, label: '腐', food: 4 },
+      // 焼き料理 (かまどで精錬。生より回復量が大きい = 本家準拠)
+      { id: 'cookedpork',   name: '焼き豚',     color: 0xF2B27A, label: '豚', food: 8 },
+      { id: 'steak',        name: 'ステーキ',   color: 0x8A4A2B, label: 'ス', food: 8 },
+      { id: 'cookedchicken',name: '焼き鳥',     color: 0xD89A55, label: '鶏', food: 6 },
+      { id: 'cookedrabbit', name: '焼き兎肉',   color: 0xC97B4E, label: '兎', food: 5 },
+      { id: 'cookedfish',   name: '焼き魚',     color: 0xC9A86A, label: '魚', food: 5 },
       { id: 'feather',    name: '羽根',           color: 0xF2F2F2, label: '羽' },
       { id: 'leather',    name: '革',             color: 0x8A5A2B, label: '革' },
       { id: 'rabbithide', name: 'うさぎの皮',     color: 0xB98A5E, label: '皮' },
@@ -474,6 +547,14 @@
       { id: 'iron',       name: '鉄インゴット',   color: 0xD8D8D8, label: '鉄' },
       { id: 'emerald',    name: 'エメラルド',     color: 0x2ECC71, label: '緑' },
       { id: 'echoshard',  name: 'エコーシャード', color: 0x2BD1C4, label: '響' },
+      // 採掘素材 (鉱石を対応ツルハシで掘ると入手。原石はかまどで精錬)
+      { id: 'coal',     name: '石炭',       color: 0x2E2E2E, label: '炭' },
+      { id: 'rawiron',  name: '鉄の原石',   color: 0xC9A37E, label: '原' },
+      { id: 'rawgold',  name: '金の原石',   color: 0xE8D26B, label: '原' },
+      { id: 'gold',     name: '金インゴット', color: 0xFCEE4B, label: '金' },
+      { id: 'diamond',  name: 'ダイヤモンド', color: 0x4AEDD9, label: 'ダ' },
+      // 松明 (設置すると灯りになり、周囲8マスに敵Mobが湧かなくなる)
+      { id: 'torch',    name: '松明',       color: 0xF2A33C, label: '松', icon: torchIconURI() },
     ];
     function matIcon(m) {
       const hex = '#' + m.color.toString(16).padStart(6, '0');
@@ -487,7 +568,7 @@
     }
     const materialById = {};
     const materials = {};
-    MATERIAL_DEFS.forEach((m) => { m.icon = matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
+    MATERIAL_DEFS.forEach((m) => { m.icon = m.icon || matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
 
     // モブ別ドロップ表 (min..max 個を一様乱数で。0 を含むものは出ないこともある)
     const MOB_DROPS = {
@@ -504,6 +585,14 @@
       golem:    [{ id: 'iron',       min: 3, max: 5 }],
       warden:   [{ id: 'echoshard',  min: 1, max: 1 }],
     };
+
+    // 鉱石の採掘ドロップ (本家準拠: 対応ティア以上のツルハシで掘らないと何も出ない)
+    // minTier: 1=木 2=石 3=鉄。石炭/ダイヤは素材を直接、鉄/金は原石→かまどで精錬。
+    const ORE_INFO = {};
+    ORE_INFO[COAL_ORE_INDEX]    = { dropId: 'coal',    minTier: 1 };
+    ORE_INFO[IRON_ORE_INDEX]    = { dropId: 'rawiron', minTier: 2 };
+    ORE_INFO[GOLD_ORE_INDEX]    = { dropId: 'rawgold', minTier: 3 };
+    ORE_INFO[DIAMOND_ORE_INDEX] = { dropId: 'diamond', minTier: 3 };
 
     // ===== ホットバー: 所持しているブロック + 作成した道具のみ表示 =====
     let hotbarItems = [];   // { kind:'block', i } | { kind:'tool', id } | { kind:'tnt' }
@@ -595,10 +684,13 @@
     }
 
     // ===== クラフト処理 =====
-    function canCraft(t) { return !ownedTools[t.id] && inventory[t.costMat] >= t.costQty; }
+    function toolCostOwned(t) { return t.costMatId ? materials[t.costMatId] : inventory[t.costMat]; }
+    function toolCostName(t)  { return t.costMatId ? materialById[t.costMatId].name : blockTypes[t.costMat].name; }
+    function canCraft(t) { return !ownedTools[t.id] && toolCostOwned(t) >= t.costQty; }
     function craftTool(t) {
       if (!canCraft(t)) return false;
-      inventory[t.costMat] -= t.costQty;
+      if (t.costMatId) materials[t.costMatId] -= t.costQty;
+      else inventory[t.costMat] -= t.costQty;
       ownedTools[t.id] = true;
       updateHotbar();
       refreshCraftPanel();
@@ -610,6 +702,12 @@
       { id: 'tnt', name: 'TNT', icon: TNT_ICON,
         costs: [{ kind: 'material', id: 'gunpowder', qty: 2 }, { kind: 'block', i: blockIndexByName['砂'], qty: 3 }],
         make() { tntCount += 1; } },
+      { id: 'furnace', name: 'かまど', icon: furnaceTexURI(),
+        costs: [{ kind: 'block', i: blockIndexByName['石'], qty: 8 }],
+        make() { inventory[blockIndexByName['かまど']] += 1; } },
+      { id: 'torch', name: '松明 ×4', icon: torchIconURI(),
+        costs: [{ kind: 'material', id: 'coal', qty: 1 }, { kind: 'block', i: blockIndexByName['木材'], qty: 1 }],
+        make() { materials.torch += 4; } },
     ];
     function recipeCostOwned(c) { return c.kind === 'material' ? materials[c.id] : inventory[c.i]; }
     function recipeCostName(c)  { return c.kind === 'material' ? materialById[c.id].name : blockTypes[c.i].name; }
@@ -629,7 +727,7 @@
     craftPanelEl.innerHTML =
       '<div class="panel"><button id="craftclose">×</button>' +
       '<h2>クラフト</h2>' +
-      '<div class="hint">材料を消費して道具やTNTを作成。E キーで開閉。道具を選ぶと対応ブロックの採掘が速くなり、剣は攻撃力UP。モブを倒すと素材が手に入り、肉系は選んで右クリックで食べてHP回復。</div>' +
+      '<div class="hint">材料を消費して道具やTNTを作成。E キーで開閉。道具を選ぶと対応ブロックの採掘が速くなり、剣は攻撃力UP。地中の鉱石はツルハシ(鉄は石以上、金/ダイヤは鉄)で採掘。かまどを設置して右クリックすると精錬でき、焼いた肉は満腹度が大きく回復。松明を置くと周囲に敵Mobが湧かなくなる。</div>' +
       '<div class="grid" id="craftgrid"></div></div>';
     document.body.appendChild(craftPanelEl);
     const craftGridEl = craftPanelEl.querySelector('#craftgrid');
@@ -651,10 +749,9 @@
         const ok = canCraft(t);
         const card = document.createElement('div');
         card.className = 'recipe' + (owned ? ' owned' : (ok ? '' : ' locked'));
-        const matName = blockTypes[t.costMat].name;
         const costLine = owned
           ? '所持済み'
-          : `${matName} × ${t.costQty}（所持 ${inventory[t.costMat]}）`;
+          : `${toolCostName(t)} × ${t.costQty}（所持 ${toolCostOwned(t)}）`;
         const img = document.createElement('img');
         img.src = t.icon; img.alt = t.name;
         const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = t.name;
@@ -699,6 +796,94 @@
         document.body.style.cursor = 'none';
       } else if (relock) {
         controls.lock();  // クリック等のユーザー操作起点で再ロック
+      } else {
+        startMsg.style.display = 'block';
+      }
+    }
+
+    // ===== かまど (精錬) — 本家準拠: 燃料を消費して生肉を焼き、原石をインゴットにする =====
+    // 燃料はチャージ制: 石炭1個 = 8回ぶん、木材1個 = 1回ぶん (不足時に自動投入)
+    const SMELT_RECIPES = [
+      { in: 'porkchop',   out: 'cookedpork' },
+      { in: 'beef',       out: 'steak' },
+      { in: 'chicken',    out: 'cookedchicken' },
+      { in: 'rabbitmeat', out: 'cookedrabbit' },
+      { in: 'rawfish',    out: 'cookedfish' },
+      { in: 'rawiron',    out: 'iron' },
+      { in: 'rawgold',    out: 'gold' },
+    ];
+    let furnaceOpen = false;
+    let furnaceFuel = 0;   // 残り精錬チャージ
+
+    const furnacePanelEl = document.createElement('div');
+    furnacePanelEl.id = 'furnacepanel';
+    furnacePanelEl.innerHTML =
+      '<div class="panel"><button id="furnaceclose">×</button>' +
+      '<h2>かまど</h2>' +
+      '<div class="hint" id="furnacefuel"></div>' +
+      '<div class="grid" id="furnacegrid"></div></div>';
+    document.body.appendChild(furnacePanelEl);
+    const furnaceGridEl = furnacePanelEl.querySelector('#furnacegrid');
+    const furnaceFuelEl = furnacePanelEl.querySelector('#furnacefuel');
+    furnacePanelEl.querySelector('#furnaceclose').addEventListener('click', () => closeFurnace(true));
+    furnacePanelEl.addEventListener('click', (e) => { if (e.target === furnacePanelEl) closeFurnace(true); });
+
+    function hasFurnaceFuelSource() {
+      return furnaceFuel > 0 || materials.coal > 0 || inventory[blockIndexByName['木材']] > 0;
+    }
+    function ensureFurnaceFuel() {
+      if (furnaceFuel > 0) return true;
+      if (materials.coal > 0) { materials.coal--; furnaceFuel += 8; return true; }
+      const woodI = blockIndexByName['木材'];
+      if (inventory[woodI] > 0) { inventory[woodI]--; furnaceFuel += 1; return true; }
+      return false;
+    }
+    function trySmelt(r) {
+      if (materials[r.in] <= 0 || !ensureFurnaceFuel()) return false;
+      furnaceFuel--;
+      materials[r.in]--;
+      materials[r.out]++;
+      updateHotbar();
+      refreshFurnacePanel();
+      return true;
+    }
+    function refreshFurnacePanel() {
+      furnaceFuelEl.textContent = `燃料チャージ: ${furnaceFuel} 回ぶん（不足時は 石炭1個=8回 / 木材1個=1回 を自動投入）`;
+      furnaceGridEl.innerHTML = '';
+      SMELT_RECIPES.forEach((r) => {
+        const mi = materialById[r.in], mo = materialById[r.out];
+        const ok = materials[r.in] > 0 && hasFurnaceFuelSource();
+        const card = document.createElement('div');
+        card.className = 'recipe' + (ok ? '' : ' locked');
+        const img = document.createElement('img'); img.src = mo.icon; img.alt = mo.name;
+        const nm = document.createElement('div'); nm.className = 'rname';
+        nm.textContent = mo.name + (mo.food ? `（満腹+${mo.food}）` : '');
+        const cs = document.createElement('div'); cs.className = 'rcost';
+        cs.textContent = `${mi.name} × 1（所持 ${materials[r.in]}）→ 所持 ${materials[r.out]}`;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (ok) card.addEventListener('click', () => trySmelt(r));
+        furnaceGridEl.appendChild(card);
+      });
+    }
+    function openFurnace() {
+      if (furnaceOpen || craftingOpen) return;
+      furnaceOpen = true;
+      refreshFurnacePanel();
+      furnacePanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      mouseDown = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeFurnace(relock) {
+      if (!furnaceOpen) return;
+      furnaceOpen = false;
+      furnacePanelEl.style.display = 'none';
+      if (usingFallback) {
+        document.body.style.cursor = 'none';
+      } else if (relock) {
+        controls.lock();
       } else {
         startMsg.style.display = 'block';
       }
@@ -829,7 +1014,7 @@
 
     // InstancedMesh をブロック種別ごとに用意
     blockTypes.forEach((bt, i) => {
-      const im = new THREE.InstancedMesh(boxGeo, bt.material, MAX_INSTANCES_PER_TYPE);
+      const im = new THREE.InstancedMesh(boxGeo, bt.material, bt.cap || MAX_INSTANCES_PER_TYPE);
       im.count = 0;
       im.userData.typeIndex = i;
       im.castShadow = false;
@@ -902,7 +1087,7 @@
       const im = instancedMeshes[typeIndex];
       const positions = instancePositions[typeIndex];
       const id = im.count;
-      if (id >= MAX_INSTANCES_PER_TYPE) {
+      if (id >= (blockTypes[typeIndex].cap || MAX_INSTANCES_PER_TYPE)) {
         console.warn('Max instances reached for type', typeIndex);
         return false;
       }
@@ -1271,6 +1456,17 @@
       return (y - 0.5) < camera.position.y - 0.05 && (y + 0.5) > feetY + 0.05;
     }
 
+    // (x,y,z) に生成する鉱石 (なければ null)。座標決定論的 = 再生成しても同じ場所に出る。
+    // 本家準拠の深度分布: 石炭は全域、鉄は浅め、金は深め、ダイヤは最深部 (溶岩域の近く)。
+    function oreTypeAt(x, y, z) {
+      const r = hashRand(x, z, Math.imul(y, 7919) + 13);
+      if (y <= -11 && r < 0.008) return DIAMOND_ORE_INDEX;
+      if (y <= -6  && r >= 0.010 && r < 0.025) return GOLD_ORE_INDEX;
+      if (y <= 0   && r >= 0.030 && r < 0.062) return IRON_ORE_INDEX;
+      if (r >= 0.070 && r < 0.115) return COAL_ORE_INDEX;
+      return null;
+    }
+
     // 1列の地中(石・洞窟・溶岩・岩盤)を生成。地表 generateColumn が h-3,h-4 まで石を
     // 置いているので、その下 (h-5) から最下層 BEDROCK_Y まで掘り下げる。
     // 改変済み(掘った/置いた)座標は地表 generateColumn が処理済みなので触らない。
@@ -1294,7 +1490,9 @@
           }
           // それ以外の洞窟は空気のまま (何も置かない)
         } else {
-          if (addBlock(cx, y, cz, STONE_INDEX)) keys.push(key(cx, y, cz));
+          // 石、まれに鉱石 (深いほど貴重な鉱石が出る)
+          const bt = oreTypeAt(cx, y, cz) ?? STONE_INDEX;
+          if (addBlock(cx, y, cz, bt)) keys.push(key(cx, y, cz));
         }
       }
       deepLoaded.set(ck, keys);
@@ -1492,8 +1690,8 @@
     });
     controls.addEventListener('unlock', () => {
       document.body.style.cursor = '';
-      // クラフトメニューで意図的にロック解除した場合は開始画面を出さない
-      if (!usingFallback && !craftingOpen) startMsg.style.display = 'block';
+      // クラフト/かまどメニューで意図的にロック解除した場合は開始画面を出さない
+      if (!usingFallback && !craftingOpen && !furnaceOpen) startMsg.style.display = 'block';
     });
 
     // ===== BGM =====
@@ -1737,6 +1935,7 @@
 
     addEventListener('keydown', (e) => {
       // E キーでクラフトメニュー開閉。開いている間は移動入力を無視
+      if (furnaceOpen) { if (e.code === 'Escape') closeFurnace(false); else if (e.code === 'KeyE') closeFurnace(true); return; }
       if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
       if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
@@ -1750,7 +1949,7 @@
       if (e.code === 'KeyS') move.b = true;
       if (e.code === 'KeyA') move.l = true;
       if (e.code === 'KeyD') move.r = true;
-      if (e.code === 'Space' && onGround) velocityY = JUMP;
+      if (e.code === 'Space' && onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); }
       if (e.code.startsWith('Digit')) {
         const idx = parseInt(e.code.slice(5)) - 1;
         if (idx >= 0 && idx < hotbarItems.length) {
@@ -1771,7 +1970,7 @@
     });
     // マウスホイールでホットバー(所持品)を巡回
     addEventListener('wheel', (e) => {
-      if (!controls.isLocked || craftingOpen || hotbarItems.length === 0) return;
+      if (!controls.isLocked || craftingOpen || furnaceOpen || hotbarItems.length === 0) return;
       const dir = e.deltaY > 0 ? 1 : -1;
       selectedSlot = (selectedSlot + dir + hotbarItems.length) % hotbarItems.length;
       updateBlockInfo();
@@ -1801,7 +2000,7 @@
     const breakFillEl = document.getElementById('breakfill');
 
     addEventListener('mousedown', (e) => {
-      if (!controls.isLocked || craftingOpen) return;
+      if (!controls.isLocked || craftingOpen || furnaceOpen) return;
       // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
       if (e.button === 2 && tryEatSelected()) return;
       raycaster.setFromCamera(centerScreen, camera);
@@ -1814,6 +2013,7 @@
       const fishHits = raycaster.intersectObjects(fishColliders, false);
       const zombieHits = raycaster.intersectObjects(zombieColliders, false);
       const golemHits = raycaster.intersectObjects(golemColliders, false);
+      const torchHits = raycaster.intersectObjects(torchClickTargets, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
       const ph = passiveHits[0];
@@ -1821,6 +2021,7 @@
       const fh = fishHits[0];
       const zh = zombieHits[0];
       const gh = golemHits[0];
+      const th = torchHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
       if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
@@ -1828,7 +2029,15 @@
       if (gh && (!hit || gh.distance < hit.distance)) { hit = gh; hitType = 'golem'; }
       if (fh && (!hit || fh.distance < hit.distance)) { hit = fh; hitType = 'fish'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
+      if (th && (!hit || th.distance < hit.distance)) { hit = th; hitType = 'torch'; }
       if (!hit || hit.distance > 8) return;
+      if (e.button === 0 && hitType !== 'block' && hitType !== 'torch') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
+
+      // 松明: 左クリックで即撤去 (本家同様アイテムとして戻る)
+      if (hitType === 'torch') {
+        if (e.button === 0) { removeTorchByObject(hit.object); startHandSwing(); }
+        return;
+      }
 
       // ウォーデン: 左クリックで攻撃 (HP制。大量に殴る必要あり)
       if (hitType === 'warden') {
@@ -1905,6 +2114,8 @@
         mineStrikeCount = 0;
         startHandSwing();
       } else if (e.button === 2) {
+        // かまどを右クリック → 精錬メニューを開く (本家準拠の対話)
+        if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }
         // 設置: ブロック or TNT
         const it = selectedItem();
         if (!it) return;
@@ -1918,8 +2129,16 @@
           tntCount--;
           updateHotbar();
           startHandSwing();
+        } else if (it.kind === 'material' && it.id === 'torch') {
+          // 松明の設置 (壁クリック時は壁掛け風)
+          if (materials.torch <= 0) return;
+          if (placeTorch(px, py, pz, n)) {
+            materials.torch--;
+            updateHotbar();
+            startHandSwing();
+          }
         } else if (it.kind === 'block') {
-          if (inventory[it.i] <= 0) return;
+          if (inventory[it.i] <= 0 || torches.has(key(px, py, pz))) return;
           const bi = it.i;
           if (addBlock(px, py, pz, bi)) {
             recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
@@ -1942,6 +2161,112 @@
     });
 
     addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // ===== 松明 — 灯りの演出 + 周囲の敵Mob湧き潰し (本家準拠) =====
+    // 設置するとその場が照らされ、半径 TORCH_SPAWN_RADIUS 以内には敵Mobが湧かない。
+    const torches = new Map();          // "x,y,z" → 松明Group
+    const torchClickTargets = [];       // レイキャスト対象 (撤去用)
+    const TORCH_SPAWN_RADIUS = 8;       // この半径内は敵Mobが湧かない
+    const TORCH_SAVE_KEY = 'mc_torches_v1';
+    const torchStickGeo = new THREE.BoxGeometry(0.13, 0.55, 0.13);
+    const torchStickMat = new THREE.MeshLambertMaterial({ color: 0x6B4A2B });
+    const torchTipGeo = new THREE.BoxGeometry(0.17, 0.17, 0.17);
+    const torchTipMat = new THREE.MeshLambertMaterial({ color: 0xFFAE3D, emissive: 0xFF9A1C, emissiveIntensity: 1.0 });
+
+    // 近くの松明だけ本物の光源を割り当てる (PointLight を大量に作るとGPU負荷が高いためプール制)
+    const TORCH_LIGHT_POOL = 6;
+    const torchLights = [];
+    for (let i = 0; i < TORCH_LIGHT_POOL; i++) {
+      const li = new THREE.PointLight(0xFFB050, 0, 9, 1.6);
+      scene.add(li);
+      torchLights.push(li);
+    }
+    let torchLightTimer = 0.5;
+    function updateTorchLights(dt) {
+      torchLightTimer += dt;
+      if (torchLightTimer < 0.5) return;
+      torchLightTimer = 0;
+      const near = [];
+      for (const g of torches.values()) {
+        const dx = g.position.x - camera.position.x, dz = g.position.z - camera.position.z;
+        near.push({ g, d2: dx * dx + dz * dz });
+      }
+      near.sort((a, b) => a.d2 - b.d2);
+      torchLights.forEach((li, i) => {
+        const t = near[i];
+        if (t && t.d2 < 40 * 40) { li.position.copy(t.g.position); li.position.y += 0.25; li.intensity = 1.4; }
+        else li.intensity = 0;
+      });
+    }
+
+    // (x,z) が松明に照らされているか? — 敵Mobのスポーン判定に使う
+    function isLitByTorch(x, z) {
+      const r2 = TORCH_SPAWN_RADIUS * TORCH_SPAWN_RADIUS;
+      for (const g of torches.values()) {
+        const dx = g.position.x - x, dz = g.position.z - z;
+        if (dx * dx + dz * dz <= r2) return true;
+      }
+      return false;
+    }
+
+    // 松明を設置。wallN は壁クリック時の面法線 (壁掛け風に傾ける)。成功で true。
+    function placeTorch(x, y, z, wallN, skipSave) {
+      const k = key(x, y, z);
+      if (blocks.has(k) || torches.has(k)) return false;
+      const g = new THREE.Group();
+      const stick = new THREE.Mesh(torchStickGeo, torchStickMat);
+      stick.position.y = -0.225;     // 棒の下端がマス底 (床) に接地
+      const tip = new THREE.Mesh(torchTipGeo, torchTipMat);
+      tip.position.y = 0.09;
+      g.add(stick); g.add(tip);
+      g.position.set(x, y, z);
+      if (wallN && wallN.y === 0 && (wallN.x !== 0 || wallN.z !== 0)) {
+        // 壁掛け: 壁側に寄せ、先端を壁から離す方向へ傾ける (本家の壁松明風)
+        g.position.x -= wallN.x * 0.3;
+        g.position.z -= wallN.z * 0.3;
+        g.rotation.z = -wallN.x * 0.42;
+        g.rotation.x = wallN.z * 0.42;
+        g.userData.wallN = { x: wallN.x, z: wallN.z };
+      }
+      g.userData.torchKey = k;
+      scene.add(g);
+      torches.set(k, g);
+      torchClickTargets.push(g);
+      if (!skipSave) saveTorches();
+      return true;
+    }
+
+    function removeTorchByObject(obj) {
+      let g = obj;
+      while (g && !g.userData.torchKey) g = g.parent;
+      if (!g) return false;
+      scene.remove(g);
+      torches.delete(g.userData.torchKey);
+      const i = torchClickTargets.indexOf(g);
+      if (i !== -1) torchClickTargets.splice(i, 1);
+      materials.torch++;   // 本家同様、撤去するとアイテムとして戻る
+      updateHotbar();
+      saveTorches();
+      return true;
+    }
+
+    function saveTorches() {
+      try {
+        const arr = [];
+        for (const [k, g] of torches) arr.push({ k, n: g.userData.wallN || null });
+        localStorage.setItem(TORCH_SAVE_KEY, JSON.stringify(arr));
+      } catch (err) { /* 容量超過などは無視 */ }
+    }
+    (function loadTorches() {
+      try {
+        const raw = localStorage.getItem(TORCH_SAVE_KEY);
+        if (!raw) return;
+        for (const t of JSON.parse(raw)) {
+          const [x, y, z] = t.k.split(',').map(Number);
+          placeTorch(x, y, z, t.n ? { x: t.n.x, y: 0, z: t.n.z } : null, true);
+        }
+      } catch (err) { /* 壊れたデータは無視 */ }
+    })();
 
     // ===== クリーパー (敵Mob) =====
     const creepers = [];
@@ -2252,7 +2577,7 @@
         const dist = CREEPER_SPAWN_MIN + Math.random() * (CREEPER_SPAWN_MAX - CREEPER_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnCreeper(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnCreeper(x, z); return true; }
       }
       return false;
     }
@@ -3017,7 +3342,7 @@
         const dist = ZOMBIE_SPAWN_MIN + Math.random() * (ZOMBIE_SPAWN_MAX - ZOMBIE_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER) { spawnZombie(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnZombie(x, z); return true; }
       }
       return false;
     }
@@ -4321,6 +4646,41 @@
     }
     updateHPDisplay();
 
+    // ===== 空腹度 (本家準拠) =====
+    // 食料は満腹度を回復し、満腹度が高い間だけ HP が自然回復する。
+    // 行動 (ダッシュ/ジャンプ/採掘/攻撃) で消耗ゲージが溜まり、4 たまるごとに満腹度が 1 減る。
+    // 満腹度 0 で飢餓ダメージ (HP 1 までは死なない = 本家ノーマル難易度)。
+    const HUNGER_MAX = 20;
+    let playerHunger = HUNGER_MAX;
+    let exhaustion = 0;                       // 行動による消耗の蓄積
+    const EXHAUSTION_PER_HUNGER = 4.0;        // この量たまると満腹度 -1
+    const HUNGER_REGEN_THRESHOLD = 18;        // 満腹度がこれ以上で HP 自然回復
+    const HUNGER_SPRINT_THRESHOLD = 6;        // 満腹度がこれ以下だとダッシュ不可
+    const EXHAUST_SPRINT_PER_SEC = 0.5;       // ダッシュ中の毎秒消耗
+    const EXHAUST_JUMP = 0.1;                 // ジャンプ1回
+    const EXHAUST_ATTACK = 0.1;               // 攻撃1回
+    const EXHAUST_MINE = 0.05;                // ブロック1個破壊
+    const EXHAUST_REGEN = 3.0;                // HP1回復ごとの消耗
+    const STARVE_INTERVAL = 4.0;              // 飢餓ダメージの間隔(秒)
+    let starveTimer = 0;
+    const hungerFillEl = document.getElementById('hungerfill');
+    const hungerTextEl = document.getElementById('hungertext');
+
+    function updateHungerDisplay() {
+      hungerFillEl.style.width = `${(playerHunger / HUNGER_MAX) * 100}%`;
+      hungerTextEl.textContent = `🍗 ${playerHunger} / ${HUNGER_MAX}`;
+    }
+    updateHungerDisplay();
+
+    function addExhaustion(amount) {
+      if (playerHP <= 0) return;
+      exhaustion += amount;
+      while (exhaustion >= EXHAUSTION_PER_HUNGER) {
+        exhaustion -= EXHAUSTION_PER_HUNGER;
+        if (playerHunger > 0) { playerHunger--; updateHungerDisplay(); }
+      }
+    }
+
     // 息ゲージ表示: 水中にいる間だけ表示し、残り息を割合で示す
     function updateBreathDisplay(headInWater) {
       if (!headInWater) { breathBarEl.style.display = 'none'; return; }
@@ -4337,13 +4697,16 @@
       return true;
     }
 
-    // 選択中アイテムが食料素材なら 1 個食べて HP 回復。食べたら true (HP満タン時は消費しない)。
+    // 選択中アイテムが食料素材なら 1 個食べて満腹度を回復 (本家準拠)。
+    // 満腹時は食べられない。HP は満腹度経由で自然回復する。
     function tryEatSelected() {
       const sel = selectedItem();
       if (!sel || sel.kind !== 'material') return false;
       const m = materialById[sel.id];
       if (!m.food || materials[sel.id] <= 0) return false;
-      if (!healPlayer(m.food)) return false;
+      if (playerHP <= 0 || playerHunger >= HUNGER_MAX) return false;
+      playerHunger = Math.min(HUNGER_MAX, playerHunger + m.food);
+      updateHungerDisplay();
       materials[sel.id]--;
       updateHotbar();
       startHandSwing();
@@ -4488,23 +4851,24 @@
       jumpBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (controls.isLocked && onGround) velocityY = JUMP;
+        if (controls.isLocked && onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); }
       }, { passive: false });
 
       // 設置ボタン (画面中央にレイ→隣接ブロック設置)
       placeBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        if (!controls.isLocked || craftingOpen) return;
+        if (!controls.isLocked || craftingOpen || furnaceOpen) return;
         if (tryEatSelected()) return;  // 食料を選択中なら食べる
-        const it = selectedItem();
-        if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
-        const bi = it.i;
         raycaster.setFromCamera(centerScreen, camera);
         const hits = raycaster.intersectObjects(instancedMeshes, false);
         if (hits.length === 0 || hits[0].distance > 8) return;
         const info = blockFromHit(hits[0]);
         if (!info) return;
+        if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }  // かまどをタップ → 精錬メニュー
+        const it = selectedItem();
+        if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
+        const bi = it.i;
         const n = hits[0].face.normal;
         const px = Math.round(info.x + n.x);
         const py = Math.round(info.y + n.y);
@@ -4526,7 +4890,7 @@
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);  // フレーム飛び対策
 
-      if (controls.isLocked && !craftingOpen) {
+      if (controls.isLocked && !craftingOpen && !furnaceOpen) {
         const fwd = (move.f ? 1 : 0) - (move.b ? 1 : 0);
         const side = (move.r ? 1 : 0) - (move.l ? 1 : 0);
 
@@ -4534,8 +4898,8 @@
         const prevX = camera.position.x;
         const prevZ = camera.position.z;
 
-        // ダッシュ中は速度2倍 (前進中のみ)
-        const curSpeed = (isDashing && fwd > 0) ? SPEED * DASH_MULTIPLIER : SPEED;
+        // ダッシュ中は速度2倍 (前進中のみ。満腹度が低いとダッシュ不可 = 本家準拠)
+        const curSpeed = (isDashing && fwd > 0 && playerHunger > HUNGER_SPRINT_THRESHOLD) ? SPEED * DASH_MULTIPLIER : SPEED;
         controls.moveForward(fwd * curSpeed * dt);
         controls.moveRight(side * curSpeed * dt);
 
@@ -4695,8 +5059,8 @@
         // 起爆中TNTの導火線進行 + 爆発
         updatePrimedTNT(dt);
 
-        // HP の自然回復 (被弾後の待機時間を超えたら徐々に回復)
-        if (playerHP > 0 && playerHP < PLAYER_MAX_HP) {
+        // HP の自然回復 (本家準拠: 満腹度 18 以上のときだけ。回復すると満腹度を消耗)
+        if (playerHP > 0 && playerHP < PLAYER_MAX_HP && playerHunger >= HUNGER_REGEN_THRESHOLD) {
           timeSinceDamage += dt;
           if (timeSinceDamage >= HP_REGEN_DELAY) {
             regenTimer += dt;
@@ -4704,9 +5068,26 @@
               playerHP = Math.min(PLAYER_MAX_HP, playerHP + 1);
               regenTimer = 0;
               updateHPDisplay();
+              addExhaustion(EXHAUST_REGEN);
             }
           }
+        } else {
+          timeSinceDamage += dt;
         }
+
+        // 飢餓: 満腹度 0 の間は一定間隔でダメージ (HP 1 までは死なない = 本家ノーマル)
+        if (playerHP > 1 && playerHunger <= 0) {
+          starveTimer += dt;
+          if (starveTimer >= STARVE_INTERVAL) {
+            starveTimer = 0;
+            damagePlayer(1, true);
+          }
+        } else {
+          starveTimer = 0;
+        }
+
+        // ダッシュ中は満腹度を消耗
+        if (isDashing && (move.f && !move.b)) addExhaustion(EXHAUST_SPRINT_PER_SEC * dt);
 
         // ブロック破壊の進行 (左クリック長押し)
         if (mouseDown) {
@@ -4729,7 +5110,15 @@
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
             if (breakProgress >= hardness) {
               const wasFluid = (info.typeIndex === WATER_INDEX || info.typeIndex === LAVA_INDEX);
-              inventory[info.typeIndex]++;
+              addExhaustion(EXHAUST_MINE);  // 採掘で満腹度を消耗 (本家準拠)
+              const ore = ORE_INFO[info.typeIndex];
+              if (ore) {
+                // 鉱石: 対応ティア以上のツルハシなら素材ドロップ、足りなければ何も出ない (本家準拠)
+                const heldTier = (tool && tool.type === 'pickaxe') ? TOOL_TIER_RANK[tool.tier] : 0;
+                if (heldTier >= ore.minTier) materials[ore.dropId]++;
+              } else {
+                inventory[info.typeIndex]++;
+              }
               updateHotbar();
               removeBlock(info.x, info.y, info.z);
               fluidMeta.delete(info.posKey);
@@ -4788,6 +5177,7 @@
       updateTimeOfDay(dt);
       updateWeather(dt);
       updateCoordHUD();
+      updateTorchLights(dt);  // 近くの松明に光源プールを割り当て
 
       // 被弾シェイク: cameraPivot を揺らして "殴られた" 感を演出
       if (shakeIntensity > 0) {
@@ -4804,7 +5194,6 @@
     }
 
     animate();
-
 
 
     // ===== リサイズ対応 =====
