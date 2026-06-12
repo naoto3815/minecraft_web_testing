@@ -95,7 +95,7 @@
       width: 100%; transition: width 0.15s linear;
     }
     #breakbar {
-      position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+      position: absolute; bottom: 108px; left: 50%; transform: translateX(-50%);
       width: 180px; height: 6px;
       background: rgba(0,0,0,0.5); border-radius: 3px;
       overflow: hidden; display: none; pointer-events: none;
@@ -108,6 +108,18 @@
       white-space: nowrap;
     }
     #toast.show { opacity: 1; }
+    #xpbar {
+      position: absolute; bottom: 76px; left: 50%; transform: translateX(-50%);
+      width: 320px; height: 8px;
+      background: rgba(0,0,0,0.55); border-radius: 4px;
+      overflow: hidden; pointer-events: none;
+    }
+    #xpfill { height: 100%; background: linear-gradient(to right, #5dbb3f, #8fe06b); width: 0%; transition: width 0.2s; }
+    #xplevel {
+      position: absolute; bottom: 88px; left: 50%; transform: translateX(-50%);
+      color: #8fe06b; font-size: 14px; font-weight: bold;
+      text-shadow: 0 0 3px black; pointer-events: none;
+    }
     #breakfill { height: 100%; background: white; width: 0%; }
     #damage-flash {
       position: absolute; inset: 0;
@@ -208,20 +220,20 @@
       pointer-events: auto; font-family: inherit;
     }
     #craftbtn:hover { background: rgba(255,255,255,0.18); }
-    #craftpanel, #furnacepanel, #chestpanel {
+    #craftpanel, #furnacepanel, #chestpanel, #tradepanel {
       position: absolute; inset: 0; z-index: 100; display: none;
       background: rgba(0,0,0,0.72);
       align-items: center; justify-content: center; pointer-events: auto;
     }
-    #craftpanel .panel, #furnacepanel .panel, #chestpanel .panel {
+    #craftpanel .panel, #furnacepanel .panel, #chestpanel .panel, #tradepanel .panel {
       background: #2b2b2b; border: 2px solid #888; border-radius: 10px;
       padding: 16px 20px 20px; max-width: 580px; width: 90%;
       max-height: 80vh; overflow: auto; color: #fff;
       font-family: sans-serif;
     }
-    #craftpanel h2, #furnacepanel h2, #chestpanel h2 { margin: 0 0 2px; font-size: 20px; }
-    #craftpanel .hint, #furnacepanel .hint, #chestpanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
-    #craftpanel .grid, #furnacepanel .grid, #chestpanel .grid {
+    #craftpanel h2, #furnacepanel h2, #chestpanel h2, #tradepanel h2 { margin: 0 0 2px; font-size: 20px; }
+    #craftpanel .hint, #furnacepanel .hint, #chestpanel .hint, #tradepanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
+    #craftpanel .grid, #furnacepanel .grid, #chestpanel .grid, #tradepanel .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px;
     }
     .recipe {
@@ -237,12 +249,12 @@
     .recipe.owned { opacity: 0.55; cursor: default; }
     .recipe.owned:hover { background: #3a3a3a; }
     .recipe.owned .rcost { color: #9fe6c4; }
-    #craftclose, #furnaceclose, #chestclose {
+    #craftclose, #furnaceclose, #chestclose, #tradeclose {
       float: right; cursor: pointer; border: none;
       background: #555; color: #fff; border-radius: 5px;
       padding: 2px 11px; font-size: 18px; line-height: 1.3;
     }
-    #craftclose:hover, #furnaceclose:hover, #chestclose:hover { background: #777; }
+    #craftclose:hover, #furnaceclose:hover, #chestclose:hover, #tradeclose:hover { background: #777; }
 
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
@@ -306,6 +318,8 @@
   <div id="armorinfo"></div>
   <div id="breathbar"><div id="breathfill"></div></div>
   <div id="toast"></div>
+  <div id="xpbar"><div id="xpfill"></div></div>
+  <div id="xplevel">Lv 0</div>
   <div id="breakbar"><div id="breakfill"></div></div>
   <div id="hotbar"></div>
   <div id="damage-flash"></div>
@@ -570,6 +584,17 @@
         });
       });
     });
+    // 弓 (ティア外の特殊ツール。クラフトは素材レシピ側で行い、所持は ownedTools で管理)
+    function bowIcon() {
+      return svgDataURI(
+        "<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" +
+        "<path d='M6 3 Q17 4 18 21' fill='none' stroke='#6b4a2b' stroke-width='2.2' stroke-linecap='round'/>" +
+        "<line x1='6' y1='3' x2='18' y2='21' stroke='#ddd' stroke-width='0.9'/>" +
+        "<line x1='4' y1='14' x2='14' y2='8' stroke='#9a7b4f' stroke-width='1.4'/>" +
+        "<path d='M14.5 6.5 L16 9 L13 9.5 Z' fill='#c9c9c9'/></svg>");
+    }
+    TOOL_DEFS.push({ id: 'bow', type: 'bow', name: '弓', icon: bowIcon(), speed: 1, attack: 0, blocks: new Set(), special: true });
+
     const toolById = {};
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
     const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
@@ -590,6 +615,7 @@
     function currentArmorReduce() {
       let best = 0;
       for (const a of ARMOR_DEFS) if (ownedArmor[a.id] && a.reduce > best) best = a.reduce;
+      if (best > 0 && enchants.armor) best = Math.min(0.8, best + 0.1);   // 防具強化 +10%
       return best;
     }
     function updateArmorHUD() {
@@ -656,6 +682,12 @@
       { id: 'seeds',    name: '種',         color: 0x7FA650, label: '種' },
       { id: 'wheat',    name: '小麦',       color: 0xD9B44A, label: '麦' },
       { id: 'bread',    name: 'パン',       color: 0xB8803C, label: 'パ', food: 5 },
+      // 弓矢・スケルトン関連
+      { id: 'arrow',    name: '矢',         color: 0xC9B896, label: '矢' },
+      { id: 'bone',     name: '骨',         color: 0xE8E8E0, label: '骨' },
+      { id: 'bonemeal', name: '骨粉',       color: 0xF2F2EA, label: '粉' },
+      // 苗木 (葉からまれに入手。草/土に植えると木に育つ)
+      { id: 'sapling',  name: '苗木',       color: 0x4E8A3C, label: '苗' },
     ];
     function matIcon(m) {
       const hex = '#' + m.color.toString(16).padStart(6, '0');
@@ -683,6 +715,7 @@
       fish:     [{ id: 'rawfish',    min: 1, max: 1 }],
       creeper:  [{ id: 'gunpowder',  min: 0, max: 2 }],
       zombie:   [{ id: 'rottenflesh', min: 0, max: 2 }],
+      skeleton: [{ id: 'bone',       min: 0, max: 2 }, { id: 'arrow', min: 0, max: 2 }],
       golem:    [{ id: 'iron',       min: 3, max: 5 }],
       warden:   [{ id: 'echoshard',  min: 1, max: 1 }],
     };
@@ -713,7 +746,11 @@
     }
     function selectedItem() { return hotbarItems[selectedSlot] || null; }
     function heldTool() { const it = selectedItem(); return it && it.kind === 'tool' ? toolById[it.id] : null; }
-    function attackDamage() { const t = heldTool(); return PMOB_ATTACK_DAMAGE + (t ? t.attack : 0); }
+    function attackDamage() {
+      const t = heldTool();
+      // 剣強化 (XPレベルで取得) は剣装備時のみ +2
+      return PMOB_ATTACK_DAMAGE + (t ? t.attack : 0) + (t && t.type === 'sword' && enchants.sword ? 2 : 0);
+    }
 
     function rebuildHotbar() {
       hotbarEl.innerHTML = '';
@@ -818,12 +855,27 @@
       { id: 'bread', name: 'パン', icon: null,
         costs: [{ kind: 'material', id: 'wheat', qty: 3 }],
         make() { materials.bread += 1; } },
+      { id: 'bow', name: '弓', icon: null, once: 'bow',
+        costs: [{ kind: 'block', i: blockIndexByName['木材'], qty: 3 }, { kind: 'material', id: 'leather', qty: 1 }],
+        make() { ownedTools.bow = true; } },
+      { id: 'arrow', name: '矢 ×4', icon: null,
+        costs: [{ kind: 'block', i: blockIndexByName['石'], qty: 1 }, { kind: 'block', i: blockIndexByName['木材'], qty: 1 }, { kind: 'material', id: 'feather', qty: 1 }],
+        make() { materials.arrow += 4; } },
+      { id: 'bonemeal', name: '骨粉 ×3', icon: null,
+        costs: [{ kind: 'material', id: 'bone', qty: 1 }],
+        make() { materials.bonemeal += 3; } },
     ];
-    // パンのアイコンは素材定義から流用 (MATERIAL_DEFS 初期化後に解決)
+    // 素材由来のアイコンは MATERIAL_DEFS 初期化後に解決
     ITEM_RECIPES.find((r) => r.id === 'bread').icon = materialById.bread.icon;
+    ITEM_RECIPES.find((r) => r.id === 'bow').icon = toolById.bow.icon;
+    ITEM_RECIPES.find((r) => r.id === 'arrow').icon = materialById.arrow.icon;
+    ITEM_RECIPES.find((r) => r.id === 'bonemeal').icon = materialById.bonemeal.icon;
     function recipeCostOwned(c) { return c.kind === 'material' ? materials[c.id] : inventory[c.i]; }
     function recipeCostName(c)  { return c.kind === 'material' ? materialById[c.id].name : blockTypes[c.i].name; }
-    function canCraftItem(r) { return r.costs.every((c) => recipeCostOwned(c) >= c.qty); }
+    function canCraftItem(r) {
+      if (r.once && ownedTools[r.once]) return false;   // 1回だけ作れるアイテム (弓など)
+      return r.costs.every((c) => recipeCostOwned(c) >= c.qty);
+    }
     function craftItem(r) {
       if (!canCraftItem(r)) return false;
       for (const c of r.costs) { if (c.kind === 'material') materials[c.id] -= c.qty; else inventory[c.i] -= c.qty; }
@@ -857,6 +909,7 @@
     function refreshCraftPanel() {
       craftGridEl.innerHTML = '';
       TOOL_DEFS.forEach((t) => {
+        if (t.special) return;   // 弓などは素材レシピ側でクラフト
         const owned = !!ownedTools[t.id];
         const ok = canCraft(t);
         const card = document.createElement('div');
@@ -889,12 +942,41 @@
         if (!owned && ok) card.addEventListener('click', () => craftArmor(a));
         craftGridEl.appendChild(card);
       });
-      // 素材レシピ (TNTなど。何度でも作れる)
+      // 強化 (エンチャントの簡易版): XPレベルを消費して1回だけ取得
+      const ENCHANT_CARDS = [
+        { key: 'sword', name: '剣の強化', desc: '剣の攻撃力 +2', icon: toolIcon('sword', '#b58cf2') },
+        { key: 'armor', name: '防具の強化', desc: '被ダメージ軽減 +10%', icon: armorIcon('#b58cf2') },
+      ];
+      ENCHANT_CARDS.forEach((ec) => {
+        const owned = !!enchants[ec.key];
+        const ok = !owned && playerLevel >= ENCHANT_COST_LEVELS;
+        const card = document.createElement('div');
+        card.className = 'recipe' + (owned ? ' owned' : (ok ? '' : ' locked'));
+        const img = document.createElement('img'); img.src = ec.icon; img.alt = ec.name;
+        const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = `${ec.name}✨`;
+        const cs = document.createElement('div'); cs.className = 'rcost';
+        cs.textContent = owned ? '強化済み' : `${ec.desc}（Lv${ENCHANT_COST_LEVELS} 消費 / 現在 Lv${playerLevel}）`;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (ok) card.addEventListener('click', () => {
+          if (enchants[ec.key] || playerLevel < ENCHANT_COST_LEVELS) return;
+          playerLevel -= ENCHANT_COST_LEVELS;
+          enchants[ec.key] = true;
+          updateXPDisplay();
+          updateArmorHUD();
+          refreshCraftPanel();
+          showToast(`${ec.name}を取得した！`);
+        });
+        craftGridEl.appendChild(card);
+      });
+      // 素材レシピ (TNTなど。何度でも作れる。once付きは1回だけ)
       ITEM_RECIPES.forEach((r) => {
+        const owned = !!(r.once && ownedTools[r.once]);
         const ok = canCraftItem(r);
         const card = document.createElement('div');
-        card.className = 'recipe' + (ok ? '' : ' locked');
-        const costLine = r.costs.map((c) => `${recipeCostName(c)} × ${c.qty}（所持 ${recipeCostOwned(c)}）`).join(' + ');
+        card.className = 'recipe' + (owned ? ' owned' : (ok ? '' : ' locked'));
+        const costLine = owned
+          ? '所持済み'
+          : r.costs.map((c) => `${recipeCostName(c)} × ${c.qty}（所持 ${recipeCostOwned(c)}）`).join(' + ');
         const img = document.createElement('img'); img.src = r.icon; img.alt = r.name;
         const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = r.name;
         const cs = document.createElement('div'); cs.className = 'rcost'; cs.textContent = costLine;
@@ -1032,7 +1114,81 @@
       return chestData[k];
     }
 
-    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen; }
+    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen; }
+
+    // ===== 村人との取引 — 本家準拠: エメラルドを通貨に売り買いする =====
+    let tradeOpen = false;
+    const TRADES = [
+      { give: { kind: 'material', id: 'wheat',   qty: 20 }, get: { kind: 'material', id: 'emerald', qty: 1 } },
+      { give: { kind: 'material', id: 'leather', qty: 6 },  get: { kind: 'material', id: 'emerald', qty: 1 } },
+      { give: { kind: 'material', id: 'coal',    qty: 15 }, get: { kind: 'material', id: 'emerald', qty: 1 } },
+      { give: { kind: 'material', id: 'rawfish', qty: 6 },  get: { kind: 'material', id: 'emerald', qty: 1 } },
+      { give: { kind: 'material', id: 'emerald', qty: 1 },  get: { kind: 'material', id: 'bread',   qty: 3 } },
+      { give: { kind: 'material', id: 'emerald', qty: 1 },  get: { kind: 'material', id: 'arrow',   qty: 16 } },
+      { give: { kind: 'material', id: 'emerald', qty: 2 },  get: { kind: 'material', id: 'iron',    qty: 1 } },
+      { give: { kind: 'material', id: 'emerald', qty: 1 },  get: { kind: 'material', id: 'torch',   qty: 8 } },
+    ];
+
+    const tradePanelEl = document.createElement('div');
+    tradePanelEl.id = 'tradepanel';
+    tradePanelEl.innerHTML =
+      '<div class="panel"><button id="tradeclose">×</button>' +
+      '<h2>村人と取引</h2>' +
+      '<div class="hint">エメラルドが通貨。素材を売ってエメラルドを手に入れ、パンや矢と交換できる。</div>' +
+      '<div class="grid" id="tradegrid"></div></div>';
+    document.body.appendChild(tradePanelEl);
+    const tradeGridEl = tradePanelEl.querySelector('#tradegrid');
+    tradePanelEl.querySelector('#tradeclose').addEventListener('click', () => closeTrade(true));
+    tradePanelEl.addEventListener('click', (e) => { if (e.target === tradePanelEl) closeTrade(true); });
+
+    function canTrade(t) { return materials[t.give.id] >= t.give.qty; }
+    function doTrade(t) {
+      if (!canTrade(t)) return false;
+      materials[t.give.id] -= t.give.qty;
+      materials[t.get.id] += t.get.qty;
+      updateHotbar();
+      refreshTradePanel();
+      return true;
+    }
+    function refreshTradePanel() {
+      tradeGridEl.innerHTML = '';
+      TRADES.forEach((t) => {
+        const ok = canTrade(t);
+        const gv = materialById[t.give.id], gt = materialById[t.get.id];
+        const card = document.createElement('div');
+        card.className = 'recipe' + (ok ? '' : ' locked');
+        const img = document.createElement('img'); img.src = gt.icon; img.alt = gt.name;
+        const nm = document.createElement('div'); nm.className = 'rname'; nm.textContent = `${gt.name} × ${t.get.qty}`;
+        const cs = document.createElement('div'); cs.className = 'rcost';
+        cs.textContent = `${gv.name} × ${t.give.qty}（所持 ${materials[t.give.id]}）`;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (ok) card.addEventListener('click', () => doTrade(t));
+        tradeGridEl.appendChild(card);
+      });
+    }
+    function openTrade() {
+      if (anyUIOpen()) return;
+      tradeOpen = true;
+      refreshTradePanel();
+      tradePanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      mouseDown = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeTrade(relock) {
+      if (!tradeOpen) return;
+      tradeOpen = false;
+      tradePanelEl.style.display = 'none';
+      if (usingFallback) {
+        document.body.style.cursor = 'none';
+      } else if (relock) {
+        controls.lock();
+      } else {
+        startMsg.style.display = 'block';
+      }
+    }
 
     const chestPanelEl = document.createElement('div');
     chestPanelEl.id = 'chestpanel';
@@ -2208,6 +2364,7 @@
       // E キーでクラフトメニュー開閉。開いている間は移動入力を無視
       if (furnaceOpen) { if (e.code === 'Escape') closeFurnace(false); else if (e.code === 'KeyE') closeFurnace(true); return; }
       if (chestOpen) { if (e.code === 'Escape') closeChest(false); else if (e.code === 'KeyE') closeChest(true); return; }
+      if (tradeOpen) { if (e.code === 'Escape') closeTrade(false); else if (e.code === 'KeyE') closeTrade(true); return; }
       if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
       if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
@@ -2275,6 +2432,25 @@
       if (!controls.isLocked || anyUIOpen()) return;
       // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
       if (e.button === 2 && tryEatSelected()) return;
+      // 弓を装備中の右クリック: 矢を放つ (照準先に関係なく飛ぶ)
+      if (e.button === 2) {
+        const bowT = heldTool();
+        if (bowT && bowT.type === 'bow') {
+          if (materials.arrow > 0) {
+            materials.arrow--;
+            updateHotbar();
+            const dir = new THREE.Vector3();
+            camera.getWorldDirection(dir);
+            const from = camera.position.clone().add(dir.clone().multiplyScalar(0.7));
+            from.y -= 0.15;
+            shootArrow(from, dir, true, ARROW_PLAYER_DAMAGE);
+            startHandSwing();
+          } else {
+            showToast('矢がない！（クラフト: 石1+木材1+羽根1 → 矢4）');
+          }
+          return;
+        }
+      }
       raycaster.setFromCamera(centerScreen, camera);
       // Block (InstancedMesh) / Creeper / 受動Mob を別レイキャストし最近接を採用
       const blockHits = raycaster.intersectObjects(instancedMeshes, false);
@@ -2287,6 +2463,8 @@
       const golemHits = raycaster.intersectObjects(golemColliders, false);
       const torchHits = raycaster.intersectObjects(torchClickTargets, true);
       const cropHits = raycaster.intersectObjects(cropClickTargets, true);
+      const skeletonHits = raycaster.intersectObjects(skeletonColliders, false);
+      const saplingHits = raycaster.intersectObjects(saplingClickTargets, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
       const ph = passiveHits[0];
@@ -2296,17 +2474,21 @@
       const gh = golemHits[0];
       const th = torchHits[0];
       const crh = cropHits[0];
+      const skh = skeletonHits[0];
+      const sph = saplingHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
       if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
       if (zh && (!hit || zh.distance < hit.distance)) { hit = zh; hitType = 'zombie'; }
+      if (skh && (!hit || skh.distance < hit.distance)) { hit = skh; hitType = 'skeleton'; }
       if (gh && (!hit || gh.distance < hit.distance)) { hit = gh; hitType = 'golem'; }
       if (fh && (!hit || fh.distance < hit.distance)) { hit = fh; hitType = 'fish'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
       if (th && (!hit || th.distance < hit.distance)) { hit = th; hitType = 'torch'; }
       if (crh && (!hit || crh.distance < hit.distance)) { hit = crh; hitType = 'crop'; }
+      if (sph && (!hit || sph.distance < hit.distance)) { hit = sph; hitType = 'sapling'; }
       if (!hit || hit.distance > 8) return;
-      if (e.button === 0 && hitType !== 'block' && hitType !== 'torch' && hitType !== 'crop') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
+      if (e.button === 0 && hitType !== 'block' && hitType !== 'torch' && hitType !== 'crop' && hitType !== 'sapling') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
 
       // 松明: 左クリックで即撤去 (本家同様アイテムとして戻る)
       if (hitType === 'torch') {
@@ -2314,12 +2496,41 @@
         return;
       }
 
-      // 作物: 左クリックで収穫 (成熟なら小麦+種、未成熟なら種だけ)
+      // 作物: 左クリックで収穫 (成熟なら小麦+種、未成熟なら種だけ)。骨粉で右クリック → 成長促進
       if (hitType === 'crop') {
-        if (e.button === 0) {
-          let g = hit.object;
-          while (g && !g.userData.cropKey) g = g.parent;
-          if (g) { removeCrop(g, true); startHandSwing(); }
+        let g = hit.object;
+        while (g && !g.userData.cropKey) g = g.parent;
+        if (g) {
+          if (e.button === 0) { removeCrop(g, true); startHandSwing(); }
+          else if (e.button === 2) {
+            const bm = selectedItem();
+            if (bm && bm.kind === 'material' && bm.id === 'bonemeal' && materials.bonemeal > 0 && g.userData.stage < 3) {
+              materials.bonemeal--;
+              g.userData.t = (g.userData.stage + 1) * CROP_STAGE_TIME;   // 1段階すすめる
+              updateCrops(0);
+              updateHotbar();
+              startHandSwing();
+            }
+          }
+        }
+        return;
+      }
+
+      // 苗木: 左クリックで回収、骨粉で右クリック → 即座に木へ成長
+      if (hitType === 'sapling') {
+        let g = hit.object;
+        while (g && !g.userData.saplingKey) g = g.parent;
+        if (g) {
+          if (e.button === 0) { removeSapling(g, true); startHandSwing(); }
+          else if (e.button === 2) {
+            const bm = selectedItem();
+            if (bm && bm.kind === 'material' && bm.id === 'bonemeal' && materials.bonemeal > 0) {
+              materials.bonemeal--;
+              growTreeFromSapling(g);
+              updateHotbar();
+              startHandSwing();
+            }
+          }
         }
         return;
       }
@@ -2340,6 +2551,16 @@
           let g = hit.object;
           while (g && !zombies.includes(g)) g = g.parent;
           if (g) { hitZombie(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
+
+      // スケルトン: 左クリックで攻撃 (HP制)
+      if (hitType === 'skeleton') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !skeletons.includes(g)) g = g.parent;
+          if (g) { hitSkeleton(g, attackDamage()); startHandSwing(); }
         }
         return;
       }
@@ -2386,7 +2607,8 @@
             hitPassiveMob(g, attackDamage());
             startHandSwing();
           } else if (e.button === 2) {
-            feedPassiveMob(g);   // 小麦/種を持って右クリック → ラブモード
+            if (g.userData.def.key === 'villager') openTrade();   // 村人 → 取引メニュー
+            else feedPassiveMob(g);   // 動物に小麦/種 → ラブモード (繁殖)
           }
         }
         return;
@@ -2426,6 +2648,16 @@
           }
           return;
         }
+        // 草/土に苗木を植える → 時間経過で木に育つ
+        if (selM && selM.kind === 'material' && selM.id === 'sapling' &&
+            (info.typeIndex === GRASS_INDEX || info.typeIndex === DIRT_INDEX)) {
+          if (materials.sapling > 0 && plantSapling(info.x, info.y + 1, info.z)) {
+            materials.sapling--;
+            updateHotbar();
+            startHandSwing();
+          }
+          return;
+        }
         // 設置: ブロック or TNT
         const it = selectedItem();
         if (!it) return;
@@ -2448,7 +2680,7 @@
             startHandSwing();
           }
         } else if (it.kind === 'block') {
-          if (inventory[it.i] <= 0 || torches.has(key(px, py, pz)) || crops.has(key(px, py, pz))) return;
+          if (inventory[it.i] <= 0 || torches.has(key(px, py, pz)) || crops.has(key(px, py, pz)) || saplings.has(key(px, py, pz))) return;
           const bi = it.i;
           if (addBlock(px, py, pz, bi)) {
             recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
@@ -2718,6 +2950,100 @@
       } catch (err) { /* 無視 */ }
     })();
 
+    // ===== 植林 — 本家準拠: 葉からまれに苗木、草/土に植えると時間経過で木に育つ =====
+    const saplings = new Map();          // "x,y,z" → 苗木Group
+    const saplingClickTargets = [];
+    const SAPLING_GROW_TIME = 90;        // 木になるまでの秒数 (骨粉で即成長)
+    const SAPLING_SAVE_KEY = 'mc_saplings_v1';
+    const _saplingMat = new THREE.MeshLambertMaterial({ color: 0x4E8A3C, side: THREE.DoubleSide, transparent: true, opacity: 0.95 });
+    let saplingSaveTimer = null;
+
+    function saplingMesh() {
+      const g = new THREE.Group();
+      const p1 = new THREE.Mesh(_cropPlaneGeo, _saplingMat);
+      const p2 = new THREE.Mesh(_cropPlaneGeo, _saplingMat);
+      p2.rotation.y = Math.PI / 2;
+      g.add(p1); g.add(p2);
+      g.scale.set(0.7, 0.5, 0.7);
+      return g;
+    }
+
+    function plantSapling(x, y, z, t, skipSave) {
+      const k = key(x, y, z);
+      if (blocks.has(k) || saplings.has(k) || crops.has(k) || torches.has(k)) return false;
+      const g = new THREE.Group();
+      g.userData.t = t || 0;
+      g.userData.saplingKey = k;
+      g.add(saplingMesh());
+      g.position.set(x, y - 0.5, z);   // 根元を地面の上面に
+      scene.add(g);
+      saplings.set(k, g);
+      saplingClickTargets.push(g);
+      if (!skipSave) scheduleSaplingSave();
+      return true;
+    }
+
+    function removeSapling(g, refund) {
+      if (refund) spawnItemDrop(g.position.x, g.position.y + 0.4, g.position.z, 'sapling', 1);
+      scene.remove(g);
+      saplings.delete(g.userData.saplingKey);
+      const i = saplingClickTargets.indexOf(g);
+      if (i !== -1) saplingClickTargets.splice(i, 1);
+      scheduleSaplingSave();
+    }
+
+    // 苗木の位置に木を生やす (プレイヤー改変として記録 → セーブ/ストリーミングでも保持)
+    function growTreeFromSapling(g) {
+      const [x, y, z] = g.userData.saplingKey.split(',').map(Number);
+      removeSapling(g, false);
+      const trunkH = 4 + Math.floor(Math.random() * 2);
+      const top = y + trunkH - 1;
+      const put = (bx, by, bz, type) => {
+        if (addBlock(bx, by, bz, type)) recordEdit(bx, by, bz, type);
+      };
+      for (let i = 0; i < trunkH; i++) put(x, y + i, z, 4);          // 幹 (木材)
+      for (let dy = -1; dy <= 0; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          for (let dz = -2; dz <= 2; dz++) {
+            if (dx === 0 && dz === 0) continue;
+            if (Math.abs(dx) === 2 && Math.abs(dz) === 2 && Math.random() < 0.5) continue;
+            put(x + dx, top + dy, z + dz, 5);                        // 葉 (下層)
+          }
+        }
+      }
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) put(x + dx, top + 1, z + dz, 5);
+      put(x, top + 2, z, 5);
+    }
+
+    function updateSaplings(dt) {
+      for (const g of [...saplings.values()]) {
+        g.userData.t += dt;
+        if (g.userData.t >= SAPLING_GROW_TIME) growTreeFromSapling(g);
+      }
+    }
+
+    function scheduleSaplingSave() {
+      if (saplingSaveTimer) clearTimeout(saplingSaveTimer);
+      saplingSaveTimer = setTimeout(() => {
+        saplingSaveTimer = null;
+        try {
+          const arr = [];
+          for (const [k, g] of saplings) arr.push({ k, t: Math.round(g.userData.t) });
+          localStorage.setItem(SAPLING_SAVE_KEY, JSON.stringify(arr));
+        } catch (err) { /* 無視 */ }
+      }, 1000);
+    }
+    (function loadSaplings() {
+      try {
+        const raw = localStorage.getItem(SAPLING_SAVE_KEY);
+        if (!raw) return;
+        for (const sp of JSON.parse(raw)) {
+          const [x, y, z] = sp.k.split(',').map(Number);
+          plantSapling(x, y, z, sp.t || 0, true);
+        }
+      } catch (err) { /* 無視 */ }
+    })();
+
     // ===== クリーパー (敵Mob) =====
     const creepers = [];
     let creeperModelTemplate = null;  // GLBがロードされたらここに格納
@@ -2956,7 +3282,10 @@
     }
 
     function killCreeper(group, drop) {
-      if (drop) dropMobLoot('creeper', group.position.x, group.position.y, group.position.z);
+      if (drop) {
+        dropMobLoot('creeper', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 5);
+      }
       stopCreeperHiss(group);  // 撃破時もシュー音停止
       scene.remove(group);
       const idx = creepers.indexOf(group);
@@ -3141,7 +3470,10 @@
     }
 
     function killWarden(group, drop) {
-      if (drop) dropMobLoot('warden', group.position.x, group.position.y, group.position.z);
+      if (drop) {
+        dropMobLoot('warden', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 1, group.position.z, 50);  // ボス級の大量XP
+      }
       scene.remove(group);
       const idx = wardens.indexOf(group);
       if (idx !== -1) wardens.splice(idx, 1);
@@ -3616,7 +3948,10 @@
     }
 
     function killFish(group, drop) {
-      if (drop) dropMobLoot('fish', group.position.x, group.position.y, group.position.z);
+      if (drop) {
+        dropMobLoot('fish', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.3, group.position.z, 1);
+      }
       scene.remove(group);
       const idx = fishes.indexOf(group);
       if (idx !== -1) fishes.splice(idx, 1);
@@ -3772,7 +4107,10 @@
     }
 
     function killZombie(group, drop) {
-      if (drop) dropMobLoot('zombie', group.position.x, group.position.y, group.position.z);
+      if (drop) {
+        dropMobLoot('zombie', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 5);
+      }
       scene.remove(group);
       const idx = zombies.indexOf(group);
       if (idx !== -1) zombies.splice(idx, 1);
@@ -3873,6 +4211,267 @@
       }
     }
 
+    // ===== 矢 (プロジェクタイル) — プレイヤーの弓 & スケルトンが共用 =====
+    const arrows = [];
+    const ARROW_SPEED = 24;
+    const ARROW_GRAVITY = 12;
+    const ARROW_LIFETIME = 4;          // 秒で自然消滅
+    const ARROW_PLAYER_DAMAGE = 6;     // プレイヤーの弓
+    const SKELETON_ARROW_DAMAGE = 3;   // スケルトンの矢 (本家ノーマル相当)
+    const _arrowGeo = new THREE.BoxGeometry(0.06, 0.06, 0.55);
+    const _arrowMat = new THREE.MeshLambertMaterial({ color: 0xC9B896 });
+
+    function shootArrow(from, dir, fromPlayer, damage) {
+      const m = new THREE.Mesh(_arrowGeo, _arrowMat);
+      m.position.copy(from);
+      m.userData = { vx: dir.x * ARROW_SPEED, vy: dir.y * ARROW_SPEED, vz: dir.z * ARROW_SPEED, fromPlayer, damage, age: 0 };
+      scene.add(m);
+      arrows.push(m);
+    }
+
+    // 矢がMob (足元originのGroup + 高さh + 半径r) に当たっているか
+    function arrowInMob(ax, ay, az, g, h, r) {
+      const dx = ax - g.position.x, dz = az - g.position.z;
+      if (dx * dx + dz * dz > (r + 0.25) * (r + 0.25)) return false;
+      return ay >= g.position.y - 0.1 && ay <= g.position.y + h + 0.25;
+    }
+
+    function updateArrows(dt) {
+      for (let i = arrows.length - 1; i >= 0; i--) {
+        const a = arrows[i], ud = a.userData;
+        ud.age += dt;
+        if (ud.age > ARROW_LIFETIME) { scene.remove(a); arrows.splice(i, 1); continue; }
+        ud.vy -= ARROW_GRAVITY * dt;
+        const nx = a.position.x + ud.vx * dt;
+        const ny = a.position.y + ud.vy * dt;
+        const nz = a.position.z + ud.vz * dt;
+        a.position.set(nx, ny, nz);
+        a.lookAt(nx + ud.vx * 0.1, ny + ud.vy * 0.1, nz + ud.vz * 0.1);
+        // ブロックに当たったら消える
+        if (isSolidAt(Math.round(nx), Math.round(ny), Math.round(nz))) {
+          scene.remove(a); arrows.splice(i, 1); continue;
+        }
+        let consumed = false;
+        if (!ud.fromPlayer) {
+          // スケルトンの矢 → プレイヤーに当たる (体の中心あたりで判定)
+          const pdx = camera.position.x - nx, pdy = (camera.position.y - 0.7) - ny, pdz = camera.position.z - nz;
+          if (pdx * pdx + pdy * pdy + pdz * pdz < 0.85 * 0.85) {
+            damagePlayer(ud.damage);
+            consumed = true;
+          }
+        } else {
+          // プレイヤーの矢 → 敵/中立/受動Mobに当たる
+          for (const zm of zombies) {
+            if (arrowInMob(nx, ny, nz, zm, ZOMBIE_HEIGHT, 0.45)) { hitZombie(zm, ud.damage); consumed = true; break; }
+          }
+          if (!consumed) for (const sk of skeletons) {
+            if (arrowInMob(nx, ny, nz, sk, SKELETON_HEIGHT, 0.45)) { hitSkeleton(sk, ud.damage); consumed = true; break; }
+          }
+          if (!consumed) for (const c of creepers) {
+            if (arrowInMob(nx, ny, nz, c, 1.8, 0.55)) {
+              c.userData.hp = (c.userData.hp ?? 1) - ud.damage;
+              c.userData.hitFlash = 0.6;
+              if (c.userData.hp <= 0) killCreeper(c, true);
+              consumed = true; break;
+            }
+          }
+          if (!consumed) for (const w of wardens) {
+            if (arrowInMob(nx, ny, nz, w, 2.9, 0.8)) { hitWarden(w, ud.damage); consumed = true; break; }
+          }
+          if (!consumed) for (const g of golems) {
+            if (arrowInMob(nx, ny, nz, g, GOLEM_HEIGHT, 0.8)) { hitGolem(g, ud.damage); consumed = true; break; }
+          }
+          if (!consumed) for (const p of passiveMobs) {
+            if (arrowInMob(nx, ny, nz, p, p.userData.def.height, p.userData.radius || 0.35)) {
+              hitPassiveMob(p, ud.damage); consumed = true; break;
+            }
+          }
+        }
+        if (consumed) { scene.remove(a); arrows.splice(i, 1); }
+      }
+    }
+
+    // ===== スケルトン (敵Mob) - 本家準拠: 夜に湧き、距離を保って矢を射る。日光で燃える =====
+    // モデルは白いボックスを組んだ手作りのブロック風 (GLB不要)
+    const skeletons = [];
+    const skeletonColliders = [];
+    const _skeletonColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+
+    const SKELETON_WIDTH = 0.6;
+    const SKELETON_HEIGHT = 1.95;
+    const SKELETON_HP = 20;
+    const SKELETON_SPEED = 1.3;
+    const SKELETON_SIGHT = 24;          // 索敵距離
+    const SKELETON_SHOOT_RANGE = 14;    // この距離以内なら撃つ
+    const SKELETON_KEEP_DIST = 7;       // これより近いと後退する (本家準拠の間合い)
+    const SKELETON_SHOOT_COOLDOWN = 2.0;
+    const SKELETON_TARGET = 4;
+    const SKELETON_SPAWN_MIN = 24;
+    const SKELETON_SPAWN_MAX = 50;
+    const SKELETON_DESPAWN_DIST = 72;
+    const SKELETON_SPAWN_INTERVAL = 4;
+    let skeletonSpawnTimer = 0;
+
+    function buildSkeletonModel() {
+      const g = new THREE.Group();
+      const boneMat = new THREE.MeshLambertMaterial({ color: 0xE8E8E0 });
+      const darkMat = new THREE.MeshLambertMaterial({ color: 0x3A3A38 });
+      const mk = (w, h, d, x, y, z, mat) => {
+        const ms = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), (mat || boneMat).clone());
+        ms.position.set(x, y, z);
+        g.add(ms);
+        return ms;
+      };
+      mk(0.5, 0.5, 0.5, 0, 1.7, 0);             // 頭
+      mk(0.09, 0.09, 0.1, -0.13, 1.78, 0.21, darkMat);  // 左目
+      mk(0.09, 0.09, 0.1,  0.13, 1.78, 0.21, darkMat);  // 右目
+      mk(0.34, 0.72, 0.18, 0, 1.08, 0);          // 胴 (あばら風に薄い)
+      mk(0.4, 0.06, 0.2, 0, 1.25, 0);            // あばら線
+      mk(0.4, 0.06, 0.2, 0, 1.1, 0);
+      mk(0.4, 0.06, 0.2, 0, 0.95, 0);
+      mk(0.11, 0.72, 0.11, -0.27, 1.08, 0);      // 左腕
+      mk(0.11, 0.72, 0.11,  0.27, 1.08, 0);      // 右腕
+      mk(0.13, 0.72, 0.13, -0.1, 0.36, 0);       // 左脚
+      mk(0.13, 0.72, 0.13,  0.1, 0.36, 0);       // 右脚
+      return g;
+    }
+
+    function spawnSkeleton(x, z) {
+      const group = new THREE.Group();
+      const visual = buildSkeletonModel();
+      visual.traverse((obj) => {
+        if (!obj.isMesh) return;
+        obj.userData.skeletonGroup = group;
+        obj.userData.origColors = [obj.material.color.clone()];
+      });
+      group.add(visual);
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(SKELETON_WIDTH, SKELETON_HEIGHT, SKELETON_WIDTH), _skeletonColliderMat);
+      collider.position.y = SKELETON_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.skeletonGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      skeletonColliders.push(collider);
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = SKELETON_HP;
+      group.userData.hitFlash = 0;
+      group.userData.shootCd = 1 + Math.random();
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+      group.userData.burnTimer = 0;
+      group.userData.groundY = (y !== null ? y : 5);
+      group.userData.footY = group.position.y;
+      group.userData.stepHopT = 0;
+      scene.add(group);
+      skeletons.push(group);
+    }
+
+    function killSkeleton(group, drop) {
+      if (drop) {
+        dropMobLoot('skeleton', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 5);
+      }
+      scene.remove(group);
+      const idx = skeletons.indexOf(group);
+      if (idx !== -1) skeletons.splice(idx, 1);
+      const ci = skeletonColliders.indexOf(group.userData.collider);
+      if (ci !== -1) skeletonColliders.splice(ci, 1);
+    }
+
+    function hitSkeleton(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
+      group.userData.hitFlash = 0.5;
+      if (group.userData.hp <= 0) killSkeleton(group, true);
+    }
+
+    function trySpawnSkeletonNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = SKELETON_SPAWN_MIN + Math.random() * (SKELETON_SPAWN_MAX - SKELETON_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnSkeleton(x, z); return true; }
+      }
+      return false;
+    }
+
+    function manageSkeletons(dt) {
+      const D2 = SKELETON_DESPAWN_DIST * SKELETON_DESPAWN_DIST;
+      for (let i = skeletons.length - 1; i >= 0; i--) {
+        const sk = skeletons[i];
+        const dx = camera.position.x - sk.position.x;
+        const dz = camera.position.z - sk.position.z;
+        if (dx * dx + dz * dz > D2) killSkeleton(sk);
+      }
+      skeletonSpawnTimer += dt;
+      if (skeletonSpawnTimer >= SKELETON_SPAWN_INTERVAL) {
+        skeletonSpawnTimer = 0;
+        if (isNightTime() && skeletons.length < SKELETON_TARGET) trySpawnSkeletonNearPlayer();
+      }
+    }
+
+    function updateSkeletons(dt) {
+      const daytime = daylightStrength() > 0.25;
+      for (let i = skeletons.length - 1; i >= 0; i--) {
+        const sk = skeletons[i];
+        const ud = sk.userData;
+        // 溶岩ダメージ
+        if (posTouchingLava(sk.position.x, sk.position.y, sk.position.z, SKELETON_HEIGHT)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0; ud.hp -= LAVA_DAMAGE; ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killSkeleton(sk); continue; }
+          }
+        } else { ud.lavaTimer = LAVA_DAMAGE_INTERVAL; }
+
+        // 日光で焼ける (本家準拠)
+        if (daytime && isSkyExposed(sk.position.x, sk.position.y + SKELETON_HEIGHT, sk.position.z)) {
+          ud.burnTimer += dt;
+          ud.hitFlash = Math.max(ud.hitFlash, 0.3 + Math.abs(Math.sin(performance.now() * 0.02)) * 0.3);
+          if (ud.burnTimer >= ZOMBIE_BURN_INTERVAL) {
+            ud.burnTimer = 0; ud.hp -= ZOMBIE_BURN_DAMAGE;
+            if (ud.hp <= 0) { killSkeleton(sk); continue; }
+          }
+        } else { ud.burnTimer = 0; }
+        if (ud.hitFlash > 0) { ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2); setCreeperFlash(sk, ud.hitFlash); }
+
+        stepMobGroupY(sk, dt, MOB_STEP_HOP);
+        ud.shootCd = Math.max(0, ud.shootCd - dt);
+
+        const dx = camera.position.x - sk.position.x;
+        const dz = camera.position.z - sk.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > SKELETON_SIGHT) continue;
+        sk.rotation.y = Math.atan2(dx, dz);
+
+        // 射程内: 立ち止まって (近すぎたら後退しつつ) 矢を放つ
+        if (dist <= SKELETON_SHOOT_RANGE) {
+          if (ud.shootCd <= 0) {
+            ud.shootCd = SKELETON_SHOOT_COOLDOWN;
+            const from = sk.position.clone();
+            from.y += SKELETON_HEIGHT * 0.75;
+            const target = camera.position.clone();
+            target.y -= 0.4;
+            const dir = target.sub(from).normalize();
+            shootArrow(from, dir, false, SKELETON_ARROW_DAMAGE);
+          }
+          if (dist >= SKELETON_KEEP_DIST) continue;   // 良い間合い: その場で撃ち続ける
+        }
+
+        // 移動: 遠ければ近づき、近すぎれば離れる (本家の間合い取り)
+        const dirSign = (dist < SKELETON_KEEP_DIST) ? -1 : 1;
+        const nx = (dx / (dist || 1)) * dirSign, nz = (dz / (dist || 1)) * dirSign;
+        const newX = sk.position.x + nx * SKELETON_SPEED * dt;
+        const newZ = sk.position.z + nz * SKELETON_SPEED * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null) continue;
+        if (newY - ud.groundY > ZOMBIE_STEP_HEIGHT) continue;
+        if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        sk.position.x = newX; sk.position.z = newZ;
+        setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
+      }
+    }
+
     // ===== アイアンゴーレム (中立Mob) - 本家準拠: プレイヤーを襲わず、敵Mobを殴り倒す番人 =====
     const golems = [];
     const golemColliders = [];
@@ -3943,7 +4542,7 @@
     // 範囲内で最も近い敵Mob (ゾンビ/クリーパー)。居なければ null
     function nearestHostileTo(g, range) {
       let best = null, bestD2 = range * range;
-      for (const arr of [zombies, creepers]) {
+      for (const arr of [zombies, skeletons, creepers]) {
         for (const e of arr) {
           const dx = e.position.x - g.position.x;
           const dz = e.position.z - g.position.z;
@@ -3954,9 +4553,10 @@
       return best;
     }
 
-    // 敵Mob (ゾンビ or クリーパー) に大ダメージ。倒したらドロップなしで除去
+    // 敵Mob (ゾンビ/スケルトン/クリーパー) に大ダメージ。倒したらドロップなしで除去
     function golemDamageHostile(e) {
       if (zombies.includes(e)) { hitZombie(e, GOLEM_MELEE_DAMAGE); return; }
+      if (skeletons.includes(e)) { hitSkeleton(e, GOLEM_MELEE_DAMAGE); return; }
       if (creepers.includes(e)) {
         e.userData.hp -= GOLEM_MELEE_DAMAGE; e.userData.hitFlash = 0.6;
         if (e.userData.hp <= 0) killCreeper(e, false);
@@ -4249,6 +4849,15 @@
           if (dmg > 0) hitZombie(zm, dmg);
         }
       }
+      // 圏内のスケルトンにダメージ
+      for (let i = skeletons.length - 1; i >= 0; i--) {
+        const sk = skeletons[i];
+        const d = Math.hypot(sk.position.x - cx, (sk.position.y + SKELETON_HEIGHT * 0.5) - cy, sk.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1) {
+          const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1)));
+          if (dmg > 0) hitSkeleton(sk, dmg);
+        }
+      }
       // 圏内のアイアンゴーレムにダメージ (HPが高いので耐えることが多い)
       for (let i = golems.length - 1; i >= 0; i--) {
         const g = golems[i];
@@ -4488,7 +5097,10 @@
     }
 
     function killPassiveMob(group, drop) {
-      if (drop) dropMobLoot(group.userData.def.key, group.position.x, group.position.y, group.position.z);
+      if (drop) {
+        dropMobLoot(group.userData.def.key, group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 2);
+      }
       scene.remove(group);
       const idx = passiveMobs.indexOf(group);
       if (idx !== -1) passiveMobs.splice(idx, 1);
@@ -4573,6 +5185,79 @@
       if (baby && baby.userData.def === def) {
         baby.userData.babyT = 0;
         baby.scale.setScalar(BABY_SCALE);
+      }
+    }
+
+    // ===== 経験値 (XP) — 本家準拠: Mobを倒すと緑のオーブが湧き、近づくと吸い寄せられて回収 =====
+    // レベルは「強化」(エンチャントの簡易版) に使う: 剣強化 (+2ダメージ) / 防具強化 (+10%軽減)
+    let playerXP = 0;       // 現レベル内の経験値
+    let playerLevel = 0;
+    const enchants = { sword: false, armor: false };   // 強化済みフラグ
+    const ENCHANT_COST_LEVELS = 5;
+    function xpNeeded() { return 10 + playerLevel * 2; }
+    const xpFillEl2 = document.getElementById('xpfill');
+    const xpLevelEl = document.getElementById('xplevel');
+    function updateXPDisplay() {
+      xpFillEl2.style.width = `${Math.min(100, (playerXP / xpNeeded()) * 100)}%`;
+      xpLevelEl.textContent = `Lv ${playerLevel}`;
+    }
+    function addXP(n) {
+      playerXP += n;
+      while (playerXP >= xpNeeded()) {
+        playerXP -= xpNeeded();
+        playerLevel++;
+        showToast(`レベルアップ！ Lv ${playerLevel}`);
+      }
+      updateXPDisplay();
+    }
+
+    const xpOrbs = [];
+    const XP_ORB_MAGNET_RANGE = 4;     // この距離でプレイヤーに吸い寄せられる
+    const XP_ORB_PICKUP_RANGE = 1.0;
+    const XP_ORB_LIFETIME = 90;
+    const _xpOrbGeo = new THREE.IcosahedronGeometry(0.12, 0);
+    const _xpOrbMat = new THREE.MeshLambertMaterial({ color: 0x8FE06B, emissive: 0x4DBB2F, emissiveIntensity: 0.8 });
+    function spawnXPOrbs(x, y, z, amount) {
+      // 1オーブ = 約3XP ぶんに分割して撒く
+      const n = Math.max(1, Math.round(amount / 3));
+      for (let i = 0; i < n; i++) {
+        const orb = new THREE.Mesh(_xpOrbGeo, _xpOrbMat);
+        orb.position.set(x + (Math.random() - 0.5) * 0.6, y + 0.3, z + (Math.random() - 0.5) * 0.6);
+        orb.userData = { xp: amount / n, vy: 1.5 + Math.random(), age: 0 };
+        scene.add(orb);
+        xpOrbs.push(orb);
+      }
+    }
+    function updateXPOrbs(dt) {
+      for (let i = xpOrbs.length - 1; i >= 0; i--) {
+        const orb = xpOrbs[i], ud = orb.userData;
+        ud.age += dt;
+        if (ud.age > XP_ORB_LIFETIME) { scene.remove(orb); xpOrbs.splice(i, 1); continue; }
+        const dx = camera.position.x - orb.position.x;
+        const dy = (camera.position.y - 0.8) - orb.position.y;
+        const dz = camera.position.z - orb.position.z;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < XP_ORB_PICKUP_RANGE * XP_ORB_PICKUP_RANGE) {
+          addXP(ud.xp);
+          scene.remove(orb); xpOrbs.splice(i, 1); continue;
+        }
+        if (d2 < XP_ORB_MAGNET_RANGE * XP_ORB_MAGNET_RANGE) {
+          // プレイヤーへ吸い寄せられる
+          const d = Math.sqrt(d2) || 0.001;
+          const sp = 6;
+          orb.position.x += (dx / d) * sp * dt;
+          orb.position.y += (dy / d) * sp * dt;
+          orb.position.z += (dz / d) * sp * dt;
+        } else {
+          // 重力で落下して床に乗る
+          ud.vy -= ITEM_DROP_GRAVITY * dt;
+          let ny = orb.position.y + ud.vy * dt;
+          const gy = creeperGroundY(orb.position.x, orb.position.z);
+          const restY = (gy !== null ? gy + 0.15 : BEDROCK_Y);
+          if (ny <= restY) { ny = restY; ud.vy = 0; }
+          orb.position.y = ny;
+        }
+        orb.rotation.y += dt * 3;
       }
     }
 
@@ -5615,6 +6300,14 @@
         updateZombies(dt);
         manageZombies(dt);
 
+        // スケルトン (敵Mob): 夜に湧き、距離を保って矢を射る。日光で焼ける
+        updateSkeletons(dt);
+        manageSkeletons(dt);
+
+        // 矢 (プレイヤーの弓 + スケルトン) と XPオーブ
+        updateArrows(dt);
+        updateXPOrbs(dt);
+
         // アイアンゴーレム (中立Mob): 徘徊しつつ敵Mobを狩る
         updateGolems(dt);
         manageGolems(dt);
@@ -5622,8 +6315,9 @@
         // 撃破モブが落とした素材アイテムの落下・回転・拾得
         updateItemDrops(dt);
 
-        // 作物の成長 + 繁殖ハートの演出
+        // 作物・苗木の成長 + 繁殖ハートの演出
         updateCrops(dt);
+        updateSaplings(dt);
         updateHearts(dt);
 
         // 起爆中TNTの導火線進行 + 爆発
@@ -5693,6 +6387,10 @@
                 // 草ブロックを壊すとまれに種 (本家の草むら相当)
                 if (info.typeIndex === GRASS_INDEX && Math.random() < 0.25) {
                   spawnItemDrop(info.x, info.y + 0.6, info.z, 'seeds', 1);
+                }
+                // 葉を壊すとまれに苗木 (本家準拠)
+                if (info.typeIndex === 5 && Math.random() < 0.12) {
+                  spawnItemDrop(info.x, info.y + 0.6, info.z, 'sapling', 1);
                 }
               }
               // 上に作物が乗っていたら一緒に壊れる (種が落ちる)
