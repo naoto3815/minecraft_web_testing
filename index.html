@@ -1915,6 +1915,7 @@
     const villageColumns = new Map();
     const villageTorches = [];     // {x,y,z} 初期化時に placeTorch する灯り
     const villagerSpawns = [];     // {x,z} 村人をスポーンさせる位置
+    const villageCrops = [];       // {x,z} 畑に植える小麦の位置 (初期化時に plantCrop)
     function vSet(x, y, z, t) {
       const ck = x + ',' + z;
       let arr = villageColumns.get(ck);
@@ -1958,28 +1959,77 @@
       for (const [ox, oz] of [[-1,-1],[1,-1],[-1,1],[1,1]]) { vSet(cx+ox, FY+2, cz+oz, 4); vSet(cx+ox, FY+3, cz+oz, 4); }  // 柱
       for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) vSet(cx+dx, FY+4, cz+dz, 4);  // 屋根
     }
+    // 汎用の建物: 床(木)・壁(wallT, wallH段)・屋根(roofT, 1マスせり出し)・ドア・窓・室内灯。境界情報を返す
+    function buildBuilding(x0, z0, w, d, wallT, roofT, doorSide, wallH) {
+      const x1 = x0 + w - 1, z1 = z0 + d - 1, FY = VILLAGE_Y, top = FY + wallH;
+      const mx = Math.floor((x0 + x1) / 2), mz = Math.floor((z0 + z1) / 2);
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) vSet(x, FY, z, 4);
+      for (let y = FY + 1; y <= top; y++) {
+        for (let x = x0; x <= x1; x++) { vSet(x, y, z0, wallT); vSet(x, y, z1, wallT); }
+        for (let z = z0; z <= z1; z++) { vSet(x0, y, z, wallT); vSet(x1, y, z, wallT); }
+      }
+      for (let x = x0 - 1; x <= x1 + 1; x++) for (let z = z0 - 1; z <= z1 + 1; z++) vSet(x, top + 1, z, roofT);
+      let dxv = mx, dzv = z1;
+      if (doorSide === 'N') dzv = z0; else if (doorSide === 'E') { dxv = x1; dzv = mz; } else if (doorSide === 'W') { dxv = x0; dzv = mz; }
+      vClear(dxv, FY + 1, dzv); vClear(dxv, FY + 2, dzv);
+      vClear(x0, FY + 3, mz); vClear(x1, FY + 3, mz); vClear(mx, FY + 3, z0); vClear(mx, FY + 3, z1);
+      villageTorches.push({ x: mx, y: FY + 1, z: mz });
+      return { x0, z0, x1, z1, mx, mz, FY, top };
+    }
     function buildVillageBlueprint() {
       const FY = VILLAGE_Y;
       for (let x = VX0; x <= VX1; x++) for (let z = VZ0; z <= VZ1; z++) vSet(x, FY, z, 0);  // 全面 草
-      // 十字の道 (土)
-      for (let x = VX0; x <= VX1; x++) for (let z = VILLAGE_CZ - 1; z <= VILLAGE_CZ + 1; z++) vSet(x, FY, z, 1);
-      for (let z = VZ0; z <= VZ1; z++) for (let x = VILLAGE_CX - 1; x <= VILLAGE_CX + 1; x++) vSet(x, FY, z, 1);
-      // 家4軒 (四隅、ドアは中央プラザ向き。壁=レンガ、屋根=木材)
-      buildVillageHouse(76, 76, 7, 6, 7, 4, 'S');
-      buildVillageHouse(110, 76, 7, 6, 7, 4, 'S');
-      buildVillageHouse(76, 110, 7, 6, 7, 4, 'N');
-      buildVillageHouse(110, 110, 7, 6, 7, 4, 'N');
-      buildVillageWell(101, 90);     // 井戸 (北東)
-      // 畑 (南西): 耕地5×4 + 中央に水
-      for (let x = 80; x <= 84; x++) for (let z = 106; z <= 109; z++) vSet(x, FY, z, FARMLAND_INDEX);
-      vSet(82, FY, 107, WATER_INDEX);
-      // 街灯8本: 木の柱(FY+1..+3) + 先端に松明(FY+4)
-      for (const [lx, lz] of [[94,86],[98,86],[94,106],[98,106],[86,94],[106,94],[86,98],[106,98]]) {
+      // 十字の石畳の道 (石)
+      for (let x = VX0; x <= VX1; x++) for (let z = VILLAGE_CZ - 1; z <= VILLAGE_CZ + 1; z++) vSet(x, FY, z, 2);
+      for (let z = VZ0; z <= VZ1; z++) for (let x = VILLAGE_CX - 1; x <= VILLAGE_CX + 1; x++) vSet(x, FY, z, 2);
+
+      // 教会 (北西): 石壁・高め・屋根の前方に十字架・石の祭壇
+      const ch = buildBuilding(76, 76, 9, 11, 2, 4, 'S', 5);
+      for (let y = ch.top + 2; y <= ch.top + 4; y++) vSet(ch.mx, y, ch.z0, 4);   // 十字架(縦)
+      vSet(ch.mx - 1, ch.top + 3, ch.z0, 4); vSet(ch.mx + 1, ch.top + 3, ch.z0, 4);  // 十字架(横)
+      vSet(ch.mx, FY + 1, ch.z0 + 1, STONE_INDEX);   // 祭壇
+
+      // パン屋 (北東): レンガ壁・かまど2台(オーブン)・カウンター
+      const bk = buildBuilding(107, 76, 8, 6, 7, 4, 'S', 4);
+      vSet(bk.x0 + 1, FY + 1, bk.z0 + 1, FURNACE_INDEX);
+      vSet(bk.x0 + 2, FY + 1, bk.z0 + 1, FURNACE_INDEX);
+      vSet(bk.x1 - 1, FY + 1, bk.z1 - 1, CHEST_INDEX);
+      vSet(bk.x1 - 1, FY + 1, bk.z0 + 1, STONE_INDEX);
+
+      // 鍛冶屋 (南東): 石壁・かまど2台・金床(黒曜石)・チェスト
+      const sm = buildBuilding(107, 108, 8, 6, 2, 4, 'N', 4);
+      vSet(sm.x0 + 1, FY + 1, sm.z1 - 1, FURNACE_INDEX);
+      vSet(sm.x0 + 2, FY + 1, sm.z1 - 1, FURNACE_INDEX);
+      vSet(sm.x1 - 1, FY + 1, sm.z0 + 1, CHEST_INDEX);
+      vSet(sm.mx, FY + 1, sm.mz, OBSIDIAN_INDEX);
+
+      // 民家2軒 + 井戸
+      buildVillageHouse(100, 86, 6, 6, 7, 4, 'S');
+      buildVillageHouse(100, 101, 6, 6, 7, 4, 'N');
+      buildVillageWell(90, 90);
+
+      // 畑 (南西): 耕地 + 中央の水路 + 小麦
+      for (let x = 78; x <= 88; x++) for (let z = 101; z <= 111; z++) {
+        if (z === 106) vSet(x, FY, z, WATER_INDEX);
+        else { vSet(x, FY, z, FARMLAND_INDEX); villageCrops.push({ x, z }); }
+      }
+
+      // 外周の柵 (木、1段)。道の出入口は隙間(門)として空ける
+      for (let x = VX0; x <= VX1; x++) {
+        if (x < 95 || x > 97) { vSet(x, FY + 1, VZ0, 4); vSet(x, FY + 1, VZ1, 4); }
+      }
+      for (let z = VZ0; z <= VZ1; z++) {
+        if (z < 95 || z > 97) { vSet(VX0, FY + 1, z, 4); vSet(VX1, FY + 1, z, 4); }
+      }
+
+      // 街灯 (プラザ4隅): 木の柱 + 先端に松明
+      for (const [lx, lz] of [[93,93],[99,93],[93,99],[99,99]]) {
         vSet(lx, FY+1, lz, 4); vSet(lx, FY+2, lz, 4); vSet(lx, FY+3, lz, 4);
         villageTorches.push({ x: lx, y: FY+4, z: lz });
       }
-      // 村人スポーン位置 (プラザ周辺)
-      villagerSpawns.push({x:93,z:93},{x:99,z:93},{x:93,z:99},{x:99,z:99},{x:96,z:91},{x:96,z:101});
+
+      // 村人スポーン (プラザ周辺。街灯/建物に重ならない開けた位置)
+      villagerSpawns.push({x:96,z:88},{x:88,z:96},{x:96,z:104},{x:104,z:96},{x:92,z:92},{x:98,z:98});
     }
     // 村の1列を生成: 平坦な地面 + ブループリントの構造物
     function generateVillageColumn(cx, cz, keys) {
@@ -3297,6 +3347,9 @@
       } catch (err) { /* 無視 */ }
     })();
 
+    // 村の畑に小麦を植える (成熟済み。プレイヤーのセーブには残さない)
+    for (const c of villageCrops) plantCrop(c.x, VILLAGE_Y + 1, c.z, 3, 0, true);
+
     // ===== 植林 — 本家準拠: 葉からまれに苗木、草/土に植えると時間経過で木に育つ =====
     const saplings = new Map();          // "x,y,z" → 苗木Group
     const saplingClickTargets = [];
@@ -3703,7 +3756,7 @@
         const dist = CREEPER_SPAWN_MIN + Math.random() * (CREEPER_SPAWN_MAX - CREEPER_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnCreeper(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z) && !inVillage(x, z)) { spawnCreeper(x, z); return true; }
       }
       return false;
     }
@@ -4477,7 +4530,7 @@
         const dist = ZOMBIE_SPAWN_MIN + Math.random() * (ZOMBIE_SPAWN_MAX - ZOMBIE_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnZombie(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z) && !inVillage(x, z)) { spawnZombie(x, z); return true; }
       }
       return false;
     }
@@ -4656,7 +4709,7 @@
         const dist = SK_SPAWN_MIN + Math.random() * (SK_SPAWN_MAX - SK_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnSlimeKnight(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z) && !inVillage(x, z)) { spawnSlimeKnight(x, z); return true; }
       }
       return false;
     }
@@ -4923,7 +4976,7 @@
         const dist = SKELETON_SPAWN_MIN + Math.random() * (SKELETON_SPAWN_MAX - SKELETON_SPAWN_MIN);
         const x = Math.round(camera.position.x + Math.cos(ang) * dist);
         const z = Math.round(camera.position.z + Math.sin(ang) * dist);
-        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnSkeleton(x, z); return true; }
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z) && !inVillage(x, z)) { spawnSkeleton(x, z); return true; }
       }
       return false;
     }
