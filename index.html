@@ -427,7 +427,15 @@
       { name: '土',     color: 0x8B5A2B, tex: 'textures/dirt.png',     hardness: 0.5 },
       { name: '石',     color: 0x9E9E9E, tex: 'textures/stone.png',    hardness: 1.5 },
       { name: '砂',     color: 0xF5DEB3, tex: 'textures/sand.png',     hardness: 0.3 },
-      { name: '木材',   color: 0xA0734F, tex: 'textures/wood.png',     hardness: 1.0 },
+      // 木材(原木): 側面=樹皮、上下面=年輪 の6面テクスチャ (本家オーク原木準拠)
+      { name: '木材',   color: 0x8A6A3C, tex: [
+          'textures/wood.png',      // +X 側面(樹皮)
+          'textures/wood.png',      // -X 側面(樹皮)
+          'textures/wood_top.png',  // +Y 上面(年輪)
+          'textures/wood_top.png',  // -Y 底面(年輪)
+          'textures/wood.png',      // +Z 側面(樹皮)
+          'textures/wood.png',      // -Z 側面(樹皮)
+        ], icon: 'textures/wood.png', hardness: 1.0 },
       { name: '葉',     color: 0x3FA13A, tex: 'textures/leaves.png',   hardness: 0.2 },
       { name: '雪',     color: 0xF0F8FF, tex: 'textures/snow.png',     hardness: 0.2 },
       { name: 'レンガ', color: 0xA0463E, tex: 'textures/brick.png',    hardness: 1.8 },
