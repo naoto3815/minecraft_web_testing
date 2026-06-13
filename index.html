@@ -872,6 +872,7 @@
       rabbit:   [{ id: 'rabbitmeat', min: 0, max: 1 }, { id: 'rabbithide', min: 0, max: 1 }],
       horse:    [{ id: 'leather',    min: 0, max: 2 }],
       slime:    [{ id: 'slimeball',  min: 1, max: 2 }],
+      bubbleslime: [{ id: 'slimeball', min: 1, max: 2 }],
       slimeknight: [{ id: 'slimeball', min: 1, max: 3 }, { id: 'iron', min: 0, max: 2 }],
       villager: [{ id: 'emerald',    min: 0, max: 1 }],
       fish:     [{ id: 'rawfish',    min: 1, max: 1 }],
@@ -5407,6 +5408,10 @@
       { key: 'rabbit',   file: '3D/Meshy_AI_Voxel_Bunny_0531110514_texture.glb',           height: 0.5, target: 5, speed: 1.5, hp: 3,  facing: 0, template: null, dimX: 0.4,  dimZ: 0.4,  radius: 0.2,  hop: true },
       // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
       { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true },
+      // バブルスライム: ドラクエの毒スライム。スライム同様ぴょんぴょん跳ねる。スライムボールをドロップ
+      { key: 'bubbleslime', file: '3D/バブルスライム.glb', height: 0.5, target: 8, speed: 1.4, hp: 8, facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, hop: true },
+      // トト: ボストンテリアの犬。友好的に歩き回る (ペット枠)
+      { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 4, speed: 1.5, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28 },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
