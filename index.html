@@ -1517,18 +1517,20 @@
     // ===== 手に持つアイテムの表示 (道具/武器=アイコン板, ブロック=立方体) =====
     // 手(hand)の子にするとスイングに追従する。深度判定を切り常に前面へ。
     {
-      const iconGeo = new THREE.PlaneGeometry(0.6, 0.6);
+      // FOV 70 では手持ちアイテムが大きく映るので、画面を覆わないサイズに調整
+      const iconGeo = new THREE.PlaneGeometry(0.46, 0.46);
       const iconMat = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, side: THREE.DoubleSide });
       heldIconPlane = new THREE.Mesh(iconGeo, iconMat);
-      heldIconPlane.position.set(-0.02, 0.34, 0.04);  // 拳の上に突き出す
+      heldIconPlane.position.set(0.0, 0.26, 0.02);  // 拳の上に突き出す
       heldIconPlane.rotation.set(0.18, -0.5, 0.35);    // 斜めに構えた角度
       heldIconPlane.renderOrder = 11;
       heldIconPlane.visible = false;
       hand.add(heldIconPlane);
 
-      const cubeGeo = new THREE.BoxGeometry(0.34, 0.34, 0.34);
+      // ブロックは回転立方体で対角シルエットが大きいため特に小さめに
+      const cubeGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
       heldBlockCube = new THREE.Mesh(cubeGeo, new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      heldBlockCube.position.set(0.0, 0.3, 0.0);
+      heldBlockCube.position.set(0.05, 0.12, 0.02);
       heldBlockCube.rotation.set(-0.35, 0.6, 0);  // 3面が見える角度
       heldBlockCube.renderOrder = 11;
       heldBlockCube.visible = false;
