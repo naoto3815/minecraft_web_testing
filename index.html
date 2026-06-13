@@ -479,8 +479,10 @@
       textureLoader.load(
         texPath,
         (tex) => {
-          tex.magFilter = THREE.NearestFilter;  // マイクラっぽいドット感
-          tex.minFilter = THREE.NearestFilter;
+          tex.magFilter = THREE.NearestFilter;  // 近くはドット感を維持 (本家のカクカク)
+          // ミップマップ有効: 遠くのブロックのテクスチャのチラつき(モアレ)を抑えてなめらかに
+          tex.minFilter = THREE.NearestMipmapLinearFilter;
+          tex.generateMipmaps = true;
           mat.map = tex;
           mat.color.set(0xffffff);
           // 自己発光ブロック(溶岩)はテクスチャ自身を発光マップにして自然に光らせる
