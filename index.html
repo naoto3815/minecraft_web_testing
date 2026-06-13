@@ -711,6 +711,7 @@
       rabbit:   [{ id: 'rabbitmeat', min: 0, max: 1 }, { id: 'rabbithide', min: 0, max: 1 }],
       horse:    [{ id: 'leather',    min: 0, max: 2 }],
       slime:    [{ id: 'slimeball',  min: 1, max: 2 }],
+      slimeknight: [{ id: 'slimeball', min: 1, max: 3 }, { id: 'iron', min: 0, max: 2 }],
       villager: [{ id: 'emerald',    min: 0, max: 1 }],
       fish:     [{ id: 'rawfish',    min: 1, max: 1 }],
       creeper:  [{ id: 'gunpowder',  min: 0, max: 2 }],
@@ -2464,6 +2465,7 @@
       const torchHits = raycaster.intersectObjects(torchClickTargets, true);
       const cropHits = raycaster.intersectObjects(cropClickTargets, true);
       const skeletonHits = raycaster.intersectObjects(skeletonColliders, false);
+      const slimeKnightHits = raycaster.intersectObjects(slimeKnightColliders, false);
       const saplingHits = raycaster.intersectObjects(saplingClickTargets, true);
       const bh = blockHits[0];
       const ch = creeperHits[0];
@@ -2475,12 +2477,14 @@
       const th = torchHits[0];
       const crh = cropHits[0];
       const skh = skeletonHits[0];
+      const skkh = slimeKnightHits[0];
       const sph = saplingHits[0];
       let hit = bh, hitType = bh ? 'block' : null;
       if (ch && (!hit || ch.distance < hit.distance)) { hit = ch; hitType = 'creeper'; }
       if (wh && (!hit || wh.distance < hit.distance)) { hit = wh; hitType = 'warden'; }
       if (zh && (!hit || zh.distance < hit.distance)) { hit = zh; hitType = 'zombie'; }
       if (skh && (!hit || skh.distance < hit.distance)) { hit = skh; hitType = 'skeleton'; }
+      if (skkh && (!hit || skkh.distance < hit.distance)) { hit = skkh; hitType = 'slimeknight'; }
       if (gh && (!hit || gh.distance < hit.distance)) { hit = gh; hitType = 'golem'; }
       if (fh && (!hit || fh.distance < hit.distance)) { hit = fh; hitType = 'fish'; }
       if (ph && (!hit || ph.distance < hit.distance)) { hit = ph; hitType = 'passive'; }
@@ -2561,6 +2565,16 @@
           let g = hit.object;
           while (g && !skeletons.includes(g)) g = g.parent;
           if (g) { hitSkeleton(g, attackDamage()); startHandSwing(); }
+        }
+        return;
+      }
+
+      // スライムナイト: 左クリックで攻撃 (HP制・タフ)
+      if (hitType === 'slimeknight') {
+        if (e.button === 0) {
+          let g = hit.object;
+          while (g && !slimeKnights.includes(g)) g = g.parent;
+          if (g) { hitSlimeKnight(g, attackDamage()); startHandSwing(); }
         }
         return;
       }
@@ -4211,6 +4225,189 @@
       }
     }
 
+    // ===== スライムナイト (敵Mob・ドラクエ風) =====
+    // スライムに乗った騎士。スライムと同じくぴょんぴょん跳ねて移動し、追いついたら剣で斬る。
+    // HPが減るとホイミ(自己回復)で緑に光って回復する。アンデッドではないので日光で燃えず昼夜徘徊する。
+    const slimeKnights = [];
+    const slimeKnightColliders = [];
+    const _slimeKnightColliderMat = new THREE.MeshBasicMaterial({ visible: false });
+    let slimeKnightModelTemplate = null;
+    let slimeKnightsReady = false;
+
+    const SK_WIDTH = 0.7;
+    const SK_HEIGHT = 1.7;
+    const SK_FACING_OFFSET = 0;
+    const SK_HP = 30;                  // 騎士なのでタフ (DQスライムナイト相当・スライム8/ゾンビ20より上)
+    const SK_SPEED = 1.7;
+    const SK_STEP_HEIGHT = 1.1;
+    const SK_SIGHT = 26;
+    const SK_MELEE_RANGE = 1.9;
+    const SK_MELEE_DAMAGE = 5;          // 剣の一撃 (ゾンビ3より重い)
+    const SK_MELEE_COOLDOWN = 1.1;
+    const SK_HOP_SPEED = 6;             // 跳ねる周期 (スライムと同じ)
+    const SK_HOP_HEIGHT = 0.34;
+    const SK_HEAL_AMOUNT = 8;           // ホイミの回復量
+    const SK_HEAL_COOLDOWN = 9;         // 自己回復の間隔(秒)
+    const SK_HEAL_THRESHOLD = 0.6;      // HPがこの割合を下回ると回復を試みる
+    const SK_TARGET = 3;               // 周囲に保つ個体数
+    const SK_SPAWN_MIN = 22;
+    const SK_SPAWN_MAX = 46;
+    const SK_DESPAWN_DIST = 72;
+    const SK_SPAWN_INTERVAL = 6;
+    let slimeKnightSpawnTimer = 0;
+
+    // 回復演出: origColors を緑へ寄せる (setCreeperFlash の緑版)
+    function setMobGreenFlash(group, intensity) {
+      group.traverse((obj) => {
+        if (!obj.isMesh || !obj.userData.origColors) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const origs = obj.userData.origColors;
+        for (let i = 0; i < mats.length; i++) {
+          const o = origs[i];
+          mats[i].color.setRGB(o.r * (1 - intensity), o.g + (1 - o.g) * intensity, o.b * (1 - intensity));
+        }
+      });
+    }
+
+    function spawnSlimeKnight(x, z) {
+      if (!slimeKnightModelTemplate) return;
+      const group = cloneMobInstance(slimeKnightModelTemplate, 'slimeKnightGroup');
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(SK_WIDTH, SK_HEIGHT, SK_WIDTH), _slimeKnightColliderMat);
+      collider.position.y = SK_HEIGHT / 2;
+      collider.visible = false;
+      collider.userData.slimeKnightGroup = group;
+      group.add(collider);
+      group.userData.collider = collider;
+      slimeKnightColliders.push(collider);
+      const y = creeperGroundY(x, z);
+      group.position.set(x, y !== null ? y : 5, z);
+      group.userData.hp = SK_HP;
+      group.userData.maxHp = SK_HP;
+      group.userData.hitFlash = 0;
+      group.userData.healFlash = 0;
+      group.userData.needRestore = false;
+      group.userData.meleeCd = 0;
+      group.userData.healCd = SK_HEAL_COOLDOWN;
+      group.userData.lavaTimer = LAVA_DAMAGE_INTERVAL;
+      group.userData.groundY = (y !== null ? y : 5);
+      group.userData.footY = group.position.y;
+      group.userData.stepHopT = 0;
+      group.userData.hopPhase = Math.random() * Math.PI * 2;
+      group.userData.visual = group.children[0];   // GLB本体 (連続ホップで上下させる)
+      group.userData.visualBaseY = group.children[0] ? group.children[0].position.y : 0;
+      scene.add(group);
+      slimeKnights.push(group);
+    }
+
+    function killSlimeKnight(group, drop) {
+      if (drop) {
+        dropMobLoot('slimeknight', group.position.x, group.position.y, group.position.z);
+        spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 8);
+      }
+      scene.remove(group);
+      const idx = slimeKnights.indexOf(group);
+      if (idx !== -1) slimeKnights.splice(idx, 1);
+      const ci = slimeKnightColliders.indexOf(group.userData.collider);
+      if (ci !== -1) slimeKnightColliders.splice(ci, 1);
+    }
+
+    function hitSlimeKnight(group, damage) {
+      group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
+      group.userData.hitFlash = 0.5;
+      if (group.userData.hp <= 0) killSlimeKnight(group, true);
+    }
+
+    function trySpawnSlimeKnightNearPlayer() {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const ang = Math.random() * Math.PI * 2;
+        const dist = SK_SPAWN_MIN + Math.random() * (SK_SPAWN_MAX - SK_SPAWN_MIN);
+        const x = Math.round(camera.position.x + Math.cos(ang) * dist);
+        const z = Math.round(camera.position.z + Math.sin(ang) * dist);
+        if (creeperGroundY(x, z) !== null && waterDepthAt(x, z) < MOB_DEEP_WATER && !isLitByTorch(x, z)) { spawnSlimeKnight(x, z); return true; }
+      }
+      return false;
+    }
+
+    function manageSlimeKnights(dt) {
+      if (!slimeKnightsReady) return;
+      const D2 = SK_DESPAWN_DIST * SK_DESPAWN_DIST;
+      for (let i = slimeKnights.length - 1; i >= 0; i--) {
+        const sk = slimeKnights[i];
+        const dx = camera.position.x - sk.position.x;
+        const dz = camera.position.z - sk.position.z;
+        if (dx * dx + dz * dz > D2) killSlimeKnight(sk);
+      }
+      // 昼夜問わず徘徊する敵 (DQモンスター。松明の灯りでは湧き潰せる)
+      slimeKnightSpawnTimer += dt;
+      if (slimeKnightSpawnTimer >= SK_SPAWN_INTERVAL) {
+        slimeKnightSpawnTimer = 0;
+        if (slimeKnights.length < SK_TARGET) trySpawnSlimeKnightNearPlayer();
+      }
+    }
+
+    function updateSlimeKnights(dt) {
+      for (let i = slimeKnights.length - 1; i >= 0; i--) {
+        const sk = slimeKnights[i];
+        const ud = sk.userData;
+        // 溶岩ダメージ
+        if (posTouchingLava(sk.position.x, sk.position.y, sk.position.z, SK_HEIGHT)) {
+          ud.lavaTimer += dt;
+          if (ud.lavaTimer >= LAVA_DAMAGE_INTERVAL) {
+            ud.lavaTimer = 0; ud.hp -= LAVA_DAMAGE; ud.hitFlash = 0.6;
+            if (ud.hp <= 0) { killSlimeKnight(sk); continue; }
+          }
+        } else { ud.lavaTimer = LAVA_DAMAGE_INTERVAL; }
+
+        // ホイミ (自己回復): HPが規定割合を下回ったら一定間隔で回復し、緑に光る
+        ud.healCd = Math.max(0, ud.healCd - dt);
+        if (ud.healCd <= 0 && ud.hp > 0 && ud.hp < ud.maxHp * SK_HEAL_THRESHOLD) {
+          ud.hp = Math.min(ud.maxHp, ud.hp + SK_HEAL_AMOUNT);
+          ud.healCd = SK_HEAL_COOLDOWN;
+          ud.healFlash = 0.8;
+        }
+        // フラッシュ更新: 回復(緑)を優先、なければ被弾(白)。どちらも切れたら元の色へ戻す
+        if (ud.hitFlash > 0) ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2);
+        if (ud.healFlash > 0) ud.healFlash = Math.max(0, ud.healFlash - dt * 1.5);
+        if (ud.healFlash > 0) { setMobGreenFlash(sk, ud.healFlash); ud.needRestore = true; }
+        else if (ud.hitFlash > 0) { setCreeperFlash(sk, ud.hitFlash); ud.needRestore = true; }
+        else if (ud.needRestore) { setCreeperFlash(sk, 0); ud.needRestore = false; }
+
+        // スライム式の連続ホップ (見た目だけを上下。接地は groundY 追従で滑らかに)
+        stepMobGroupY(sk, dt, 0);
+        ud.hopPhase += dt * SK_HOP_SPEED;
+        if (ud.visual) ud.visual.position.y = ud.visualBaseY + Math.max(0, Math.sin(ud.hopPhase)) * SK_HOP_HEIGHT;
+
+        ud.meleeCd = Math.max(0, ud.meleeCd - dt);
+        const dx = camera.position.x - sk.position.x;
+        const dz = camera.position.z - sk.position.z;
+        const dy = camera.position.y - sk.position.y;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > SK_SIGHT) continue;
+        sk.rotation.y = Math.atan2(dx, dz) + SK_FACING_OFFSET;
+
+        // 近接攻撃 (剣で斬る)
+        if (dist < SK_MELEE_RANGE && Math.abs(dy) < 2.5) {
+          if (ud.meleeCd <= 0) {
+            damagePlayer(SK_MELEE_DAMAGE);
+            ud.meleeCd = SK_MELEE_COOLDOWN;
+            ud.hopPhase = Math.PI / 2;   // 斬りかかる瞬間にぴょんと跳ねる
+          }
+          continue;
+        }
+
+        // 追跡 (プレイヤーへ跳ねながら寄る)
+        const nx = dx / (dist || 1), nz = dz / (dist || 1);
+        const newX = sk.position.x + nx * SK_SPEED * dt;
+        const newZ = sk.position.z + nz * SK_SPEED * dt;
+        const newY = creeperGroundY(newX, newZ);
+        if (newY === null) continue;
+        if (newY - ud.groundY > SK_STEP_HEIGHT) continue;
+        if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        sk.position.x = newX; sk.position.z = newZ;
+        setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
+      }
+    }
+
     // ===== 矢 (プロジェクタイル) — プレイヤーの弓 & スケルトンが共用 =====
     const arrows = [];
     const ARROW_SPEED = 24;
@@ -4266,6 +4463,9 @@
           }
           if (!consumed) for (const sk of skeletons) {
             if (arrowInMob(nx, ny, nz, sk, SKELETON_HEIGHT, 0.45)) { hitSkeleton(sk, ud.damage); consumed = true; break; }
+          }
+          if (!consumed) for (const skk of slimeKnights) {
+            if (arrowInMob(nx, ny, nz, skk, SK_HEIGHT, 0.45)) { hitSlimeKnight(skk, ud.damage); consumed = true; break; }
           }
           if (!consumed) for (const c of creepers) {
             if (arrowInMob(nx, ny, nz, c, 1.8, 0.55)) {
@@ -4539,10 +4739,10 @@
       if (group.userData.hp <= 0) killGolem(group, true);
     }
 
-    // 範囲内で最も近い敵Mob (ゾンビ/クリーパー)。居なければ null
+    // 範囲内で最も近い敵Mob (ゾンビ/スケルトン/スライムナイト/クリーパー)。居なければ null
     function nearestHostileTo(g, range) {
       let best = null, bestD2 = range * range;
-      for (const arr of [zombies, skeletons, creepers]) {
+      for (const arr of [zombies, skeletons, slimeKnights, creepers]) {
         for (const e of arr) {
           const dx = e.position.x - g.position.x;
           const dz = e.position.z - g.position.z;
@@ -4553,10 +4753,11 @@
       return best;
     }
 
-    // 敵Mob (ゾンビ/スケルトン/クリーパー) に大ダメージ。倒したらドロップなしで除去
+    // 敵Mob (ゾンビ/スケルトン/スライムナイト/クリーパー) に大ダメージ。倒したらドロップなしで除去
     function golemDamageHostile(e) {
       if (zombies.includes(e)) { hitZombie(e, GOLEM_MELEE_DAMAGE); return; }
       if (skeletons.includes(e)) { hitSkeleton(e, GOLEM_MELEE_DAMAGE); return; }
+      if (slimeKnights.includes(e)) { hitSlimeKnight(e, GOLEM_MELEE_DAMAGE); return; }
       if (creepers.includes(e)) {
         e.userData.hp -= GOLEM_MELEE_DAMAGE; e.userData.hitFlash = 0.6;
         if (e.userData.hp <= 0) killCreeper(e, false);
@@ -4673,6 +4874,12 @@
     });
     loadMobGLB('3D/Meshy_AI_Vinebound_Golem_0531110440_texture.glb', GOLEM_HEIGHT, GOLEM_FACING_OFFSET, (wrapper) => {
       golemModelTemplate = wrapper; spawnInitialGolems();
+    });
+    loadMobGLB('3D/スライムナイト.glb', SK_HEIGHT, SK_FACING_OFFSET, (wrapper) => {
+      slimeKnightModelTemplate = wrapper; slimeKnightsReady = true;
+      // 昼夜問わず徘徊するので最初から周囲に湧かせる
+      let guard = 0;
+      while (slimeKnights.length < SK_TARGET && guard++ < 40) { if (!trySpawnSlimeKnightNearPlayer()) break; }
     });
 
     // ===== 爆発パーティクル =====
@@ -4856,6 +5063,15 @@
         if (d < EXPLOSION_RADIUS + 1) {
           const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1)));
           if (dmg > 0) hitSkeleton(sk, dmg);
+        }
+      }
+      // 圏内のスライムナイトにダメージ
+      for (let i = slimeKnights.length - 1; i >= 0; i--) {
+        const skk = slimeKnights[i];
+        const d = Math.hypot(skk.position.x - cx, (skk.position.y + SK_HEIGHT * 0.5) - cy, skk.position.z - cz);
+        if (d < EXPLOSION_RADIUS + 1) {
+          const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - d / (EXPLOSION_RADIUS + 1)));
+          if (dmg > 0) hitSlimeKnight(skk, dmg);
         }
       }
       // 圏内のアイアンゴーレムにダメージ (HPが高いので耐えることが多い)
@@ -6303,6 +6519,10 @@
         // スケルトン (敵Mob): 夜に湧き、距離を保って矢を射る。日光で焼ける
         updateSkeletons(dt);
         manageSkeletons(dt);
+
+        // スライムナイト (敵Mob・DQ風): ぴょんぴょん跳ねて追跡し剣で斬る。たまにホイミで自己回復
+        updateSlimeKnights(dt);
+        manageSlimeKnights(dt);
 
         // 矢 (プレイヤーの弓 + スケルトン) と XPオーブ
         updateArrows(dt);
