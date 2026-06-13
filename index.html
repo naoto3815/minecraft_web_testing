@@ -1893,6 +1893,104 @@
       return Math.abs(caveNoise(x * 0.09, y * 0.13, z * 0.09)) > 0.67;
     }
 
+    // ===== 村 (スポーン地点の50×50。ゲーム開始地点) =====
+    const VILLAGE_CX = 96, VILLAGE_CZ = 96;   // 村の中心 (= スポーン)
+    const VILLAGE_Y = 9;                       // 村の地面の高さ (草ブロックの y)
+    const VILLAGE_HALF = 25;                   // 中心から±(HALF-1) → 約50×50
+    const VILLAGE_BORDER = 6;                  // 周囲の自然地形となだらかに繋ぐブレンド幅
+    const VX0 = VILLAGE_CX - VILLAGE_HALF + 1, VX1 = VILLAGE_CX + VILLAGE_HALF - 1;  // [72,120]
+    const VZ0 = VILLAGE_CZ - VILLAGE_HALF + 1, VZ1 = VILLAGE_CZ + VILLAGE_HALF - 1;
+    function inVillage(x, z) { return x >= VX0 && x <= VX1 && z >= VZ0 && z <= VZ1; }
+    // 村(平坦)→自然地形 のブレンド係数 (1=村, 0=自然)
+    function villageBlend(x, z) {
+      const dx = Math.max(0, Math.abs(x - VILLAGE_CX) - (VILLAGE_HALF - 1));
+      const dz = Math.max(0, Math.abs(z - VILLAGE_CZ) - (VILLAGE_HALF - 1));
+      const d = Math.max(dx, dz);
+      if (d <= 0) return 1;
+      if (d >= VILLAGE_BORDER) return 0;
+      return 1 - d / VILLAGE_BORDER;
+    }
+    // 村の建造物ブループリント: "x,z" → [{y,t}]。街灯/村人スポーン位置も記録
+    const villageColumns = new Map();
+    const villageTorches = [];     // {x,y,z} 初期化時に placeTorch する灯り
+    const villagerSpawns = [];     // {x,z} 村人をスポーンさせる位置
+    function vSet(x, y, z, t) {
+      const ck = x + ',' + z;
+      let arr = villageColumns.get(ck);
+      if (!arr) { arr = []; villageColumns.set(ck, arr); }
+      const ex = arr.find(e => e.y === y);
+      if (ex) ex.t = t; else arr.push({ y, t });
+    }
+    function vClear(x, y, z) {
+      const arr = villageColumns.get(x + ',' + z);
+      if (!arr) return;
+      const i = arr.findIndex(e => e.y === y);
+      if (i >= 0) arr.splice(i, 1);
+    }
+    // 家: 床(木)・壁(指定素材)・屋根・ドア・窓・内装(ベッド/かまど/チェスト)・室内灯
+    function buildVillageHouse(x0, z0, w, d, wallT, roofT, doorSide) {
+      const x1 = x0 + w - 1, z1 = z0 + d - 1, FY = VILLAGE_Y;
+      const mx = Math.floor((x0 + x1) / 2), mz = Math.floor((z0 + z1) / 2);
+      for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) vSet(x, FY, z, 4);  // 床(木材)
+      for (let y = FY + 1; y <= FY + 4; y++) {                                          // 壁(周囲4段)
+        for (let x = x0; x <= x1; x++) { vSet(x, y, z0, wallT); vSet(x, y, z1, wallT); }
+        for (let z = z0; z <= z1; z++) { vSet(x0, y, z, wallT); vSet(x1, y, z, wallT); }
+      }
+      for (let x = x0 - 1; x <= x1 + 1; x++) for (let z = z0 - 1; z <= z1 + 1; z++) vSet(x, FY + 5, z, roofT); // 屋根(1マスせり出し)
+      // ドア (壁の中央2段を空ける)
+      let dxv = mx, dzv = z1;
+      if (doorSide === 'N') dzv = z0; else if (doorSide === 'E') { dxv = x1; dzv = mz; } else if (doorSide === 'W') { dxv = x0; dzv = mz; }
+      vClear(dxv, FY + 1, dzv); vClear(dxv, FY + 2, dzv);
+      // 窓 (各壁中央 上段を空ける)
+      vClear(x0, FY + 3, mz); vClear(x1, FY + 3, mz); vClear(mx, FY + 3, z0); vClear(mx, FY + 3, z1);
+      // 内装 (床の上 = FY+1)
+      vSet(x0 + 1, FY + 1, z0 + 1, BED_INDEX);
+      vSet(x1 - 1, FY + 1, z0 + 1, FURNACE_INDEX);
+      vSet(x1 - 1, FY + 1, z1 - 1, CHEST_INDEX);
+      villageTorches.push({ x: mx, y: FY + 1, z: mz });   // 室内の松明
+    }
+    function buildVillageWell(cx, cz) {
+      const FY = VILLAGE_Y;
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        vSet(cx + dx, FY + 1, cz + dz, (dx === 0 && dz === 0) ? WATER_INDEX : STONE_INDEX);  // 石枠 + 中央に水
+      }
+      for (const [ox, oz] of [[-1,-1],[1,-1],[-1,1],[1,1]]) { vSet(cx+ox, FY+2, cz+oz, 4); vSet(cx+ox, FY+3, cz+oz, 4); }  // 柱
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) vSet(cx+dx, FY+4, cz+dz, 4);  // 屋根
+    }
+    function buildVillageBlueprint() {
+      const FY = VILLAGE_Y;
+      for (let x = VX0; x <= VX1; x++) for (let z = VZ0; z <= VZ1; z++) vSet(x, FY, z, 0);  // 全面 草
+      // 十字の道 (土)
+      for (let x = VX0; x <= VX1; x++) for (let z = VILLAGE_CZ - 1; z <= VILLAGE_CZ + 1; z++) vSet(x, FY, z, 1);
+      for (let z = VZ0; z <= VZ1; z++) for (let x = VILLAGE_CX - 1; x <= VILLAGE_CX + 1; x++) vSet(x, FY, z, 1);
+      // 家4軒 (四隅、ドアは中央プラザ向き。壁=レンガ、屋根=木材)
+      buildVillageHouse(76, 76, 7, 6, 7, 4, 'S');
+      buildVillageHouse(110, 76, 7, 6, 7, 4, 'S');
+      buildVillageHouse(76, 110, 7, 6, 7, 4, 'N');
+      buildVillageHouse(110, 110, 7, 6, 7, 4, 'N');
+      buildVillageWell(101, 90);     // 井戸 (北東)
+      // 畑 (南西): 耕地5×4 + 中央に水
+      for (let x = 80; x <= 84; x++) for (let z = 106; z <= 109; z++) vSet(x, FY, z, FARMLAND_INDEX);
+      vSet(82, FY, 107, WATER_INDEX);
+      // 街灯8本: 木の柱(FY+1..+3) + 先端に松明(FY+4)
+      for (const [lx, lz] of [[94,86],[98,86],[94,106],[98,106],[86,94],[106,94],[86,98],[106,98]]) {
+        vSet(lx, FY+1, lz, 4); vSet(lx, FY+2, lz, 4); vSet(lx, FY+3, lz, 4);
+        villageTorches.push({ x: lx, y: FY+4, z: lz });
+      }
+      // 村人スポーン位置 (プラザ周辺)
+      villagerSpawns.push({x:93,z:93},{x:99,z:93},{x:93,z:99},{x:99,z:99},{x:96,z:91},{x:96,z:101});
+    }
+    // 村の1列を生成: 平坦な地面 + ブループリントの構造物
+    function generateVillageColumn(cx, cz, keys) {
+      if (addBlock(cx, VILLAGE_Y - 1, cz, 1)) keys.push(key(cx, VILLAGE_Y - 1, cz));  // 土
+      if (addBlock(cx, VILLAGE_Y - 2, cz, 1)) keys.push(key(cx, VILLAGE_Y - 2, cz));
+      if (addBlock(cx, VILLAGE_Y - 3, cz, 2)) keys.push(key(cx, VILLAGE_Y - 3, cz));  // 石
+      if (addBlock(cx, VILLAGE_Y - 4, cz, 2)) keys.push(key(cx, VILLAGE_Y - 4, cz));
+      const arr = villageColumns.get(cx + ',' + cz);
+      if (arr) { for (const { y, t } of arr) { if (addBlock(cx, y, cz, t)) keys.push(key(cx, y, cz)); } }
+      else if (addBlock(cx, VILLAGE_Y, cz, 0)) keys.push(key(cx, VILLAGE_Y, cz));
+    }
+
     function terrainHeight(x, z) {
       // 4オクターブのフラクタルノイズ (amplitude 1/2 ずつ、freq 2倍ずつ)
       let h = 0;
@@ -1907,7 +2005,11 @@
       }
       // [-totalAmp, totalAmp] → [0, 1] → [HEIGHT_MIN, HEIGHT_MAX]
       const t = (h / totalAmp + 1) * 0.5;
-      return Math.floor(HEIGHT_MIN + t * (HEIGHT_MAX - HEIGHT_MIN + 1));
+      const natural = Math.floor(HEIGHT_MIN + t * (HEIGHT_MAX - HEIGHT_MIN + 1));
+      // 村は平坦化 (周囲とはブレンドで滑らかに繋ぐ)
+      const vb = villageBlend(x, z);
+      if (vb <= 0) return natural;
+      return Math.round(natural * (1 - vb) + VILLAGE_Y * vb);
     }
 
     // 表面ブロック: 1 (土) または 3 (砂)
@@ -1990,6 +2092,20 @@
       const ck = colKey(cx, cz);
       if (loadedColumns.has(ck)) return;
       const keys = [];
+      // 村の範囲は平坦な地面 + 建造物を生成 (通常の地形生成はスキップ)
+      if (inVillage(cx, cz)) {
+        generateVillageColumn(cx, cz, keys);
+        const ev = edits.get(ck);
+        if (ev) {
+          for (const [bk, val] of ev) {
+            const [bx, by, bz] = bk.split(',').map(Number);
+            removeBlock(bx, by, bz);
+            if (val >= 0 && addBlock(bx, by, bz, val)) keys.push(bk);
+          }
+        }
+        loadedColumns.set(ck, keys);
+        return;
+      }
       const h = terrainHeight(cx, cz);
       const surface = getSurfaceType(cx, cz);
       if (addBlock(cx, h,     cz, surface)) keys.push(key(cx, h, cz));     // 表面
@@ -2223,6 +2339,9 @@
 
     // 保存済みの改変を復元 (initialLoad より前に呼ぶ → スポーン周辺に即反映)
     loadEdits();
+
+    // 村のブループリントを構築 (initialLoad より前。generateColumn が参照する)
+    buildVillageBlueprint();
 
     // 起動時: スポーン周囲をまとめて生成 (以降は移動に応じてストリーミング)
     (function initialLoad() {
@@ -2995,6 +3114,9 @@
         }
       } catch (err) { /* 壊れたデータは無視 */ }
     })();
+
+    // 村の灯り (街灯・室内の松明) を設置。プレイヤーのセーブには残さない(skipSave)
+    for (const t of villageTorches) placeTorch(t.x, t.y, t.z, null, true);
 
     // ===== トースト表示 (画面下部の一時メッセージ) =====
     const toastEl = document.getElementById('toast');
@@ -5980,7 +6102,11 @@
           const wrapper = new THREE.Group();
           wrapper.add(model);
           def.template = wrapper;
-          // 初期スポーン
+          // 村人は村の広場周辺に配置 (それ以外の通常スポーンより優先)
+          if (def.key === 'villager') {
+            for (const s of villagerSpawns) spawnPassiveMob(def, s.x, s.z);
+          }
+          // 初期スポーン (目標数まで周囲に補充)
           let guard = 0;
           while (countPassiveMobs(def) < def.target && guard++ < 30) {
             if (!trySpawnPassiveMobNearPlayer(def)) break;
