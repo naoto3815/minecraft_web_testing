@@ -302,6 +302,7 @@
     <strong>操作</strong><br>
     WASD: 移動  /  Space: ジャンプ<br>
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
+    Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止
   </div>
   <div id="blockinfo">選択中: 草</div>
@@ -2523,8 +2524,12 @@
     }
 
     // ===== 移動入力 =====
-    const move = { f: false, b: false, l: false, r: false };
+    const move = { f: false, b: false, l: false, r: false, up: false, down: false };
     let velocityY = 0;
+    let flying = false;                 // 飛行モード (Spaceダブルタップで切替)
+    let lastSpaceTapTime = -Infinity;   // Space連打判定用
+    const FLY_VSPEED = 8;               // 飛行中の上昇/下降速度
+    const FLY_HSPEED = 9;               // 飛行中の水平移動速度 (歩行より速い)
     let onGround = false;
     let fallStartY = null;       // 落下中のピークY (着地時にダメージ計算)
     const FALL_SAFE_HEIGHT = 4;  // この高さ以上落ちるとダメージ
@@ -2629,6 +2634,26 @@
       return false;
     }
 
+    // 飛行中の上下移動 (1フレーム分)。Space上昇/Shift下降。上下に体が当たるブロックがあれば止まる
+    function flightVerticalStep(dt) {
+      const bodyBlockedAtY = (ny) => {
+        for (const dx of [-PLAYER_RADIUS, PLAYER_RADIUS])
+          for (const dz of [-PLAYER_RADIUS, PLAYER_RADIUS])
+            if (hasCeiling(camera.position.x + dx, camera.position.z + dz, ny)) return true;
+        return false;
+      };
+      let dy = 0;
+      if (move.up) dy += FLY_VSPEED * dt;
+      if (move.down) dy -= FLY_VSPEED * dt;
+      if (dy !== 0) {
+        const ny = camera.position.y + dy;
+        if (!bodyBlockedAtY(ny)) camera.position.y = ny;
+      }
+      velocityY = 0;
+      onGround = false;
+      fallStartY = null;  // 飛行中は落下ダメージなし
+    }
+
     // 体が固体ブロックに埋まったら(窒息・嵌り)、すぐ上の空きへ少しだけ持ち上げて救出する安全網。
     const UNSTICK_RESCUE_MAX = 3;   // この高さまでの空きにしか救出しない (地表まで打ち上げない)
     function unstickPlayer() {
@@ -2670,7 +2695,19 @@
       if (e.code === 'KeyS') move.b = true;
       if (e.code === 'KeyA') move.l = true;
       if (e.code === 'KeyD') move.r = true;
-      if (e.code === 'Space' && onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); }
+      if (e.code === 'Space') {
+        move.up = true;
+        if (!e.repeat) {  // Spaceダブルタップで飛行ON/OFF (キーリピートは無視)
+          const now = clock.getElapsedTime();
+          if (now - lastSpaceTapTime < DOUBLE_TAP_WINDOW) {
+            flying = !flying; velocityY = 0;
+            if (typeof showToast === 'function') showToast(flying ? '飛行モード ON  (Space:上昇 / Shift:下降 / Spaceダブルタップで解除)' : '飛行モード OFF');
+          }
+          lastSpaceTapTime = now;
+        }
+        if (!flying && onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); }  // 通常ジャンプ
+      }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') move.down = true;
       if (e.code.startsWith('Digit')) {
         const idx = parseInt(e.code.slice(5)) - 1;
         if (idx >= 0 && idx < hotbarItems.length) {
@@ -2688,6 +2725,8 @@
       if (e.code === 'KeyS') move.b = false;
       if (e.code === 'KeyA') move.l = false;
       if (e.code === 'KeyD') move.r = false;
+      if (e.code === 'Space') move.up = false;
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') move.down = false;
     });
     // マウスホイールでホットバー(所持品)を巡回
     addEventListener('wheel', (e) => {
@@ -6681,8 +6720,9 @@
         const prevX = camera.position.x;
         const prevZ = camera.position.z;
 
-        // ダッシュ中は速度2倍 (前進中のみ。満腹度が低いとダッシュ不可 = 本家準拠)
-        const curSpeed = (isDashing && fwd > 0 && playerHunger > HUNGER_SPRINT_THRESHOLD) ? SPEED * DASH_MULTIPLIER : SPEED;
+        // ダッシュ中は速度2倍 (前進中のみ。満腹度が低いとダッシュ不可 = 本家準拠)。飛行中は専用速度
+        const curSpeed = flying ? FLY_HSPEED
+          : (isDashing && fwd > 0 && playerHunger > HUNGER_SPRINT_THRESHOLD) ? SPEED * DASH_MULTIPLIER : SPEED;
         controls.moveForward(fwd * curSpeed * dt);
         controls.moveRight(side * curSpeed * dt);
 
@@ -6709,6 +6749,10 @@
           }
         }
 
+        // 飛行モード: 重力なし。Space上昇 / Shift下降。ブロックには衝突する (すり抜けない)
+        if (flying) {
+          flightVerticalStep(dt);
+        } else {
         // 重力
         velocityY += GRAVITY * dt;
         camera.position.y += velocityY * dt;
@@ -6752,6 +6796,7 @@
           // 大きな落下・空中
           onGround = false;
         }
+        }  // 飛行/重力 分岐の終わり
 
         // 奈落落下: y < VOID_Y で即死
         if (camera.position.y < VOID_Y && playerHP > 0) {
