@@ -1316,7 +1316,10 @@
     scene.background = new THREE.Color(0x87CEEB);
     scene.fog = new THREE.Fog(0x87CEEB, 28, 64);  // far はストリーミング半径(LOAD_RADIUS)以内に
 
-    const camera = new THREE.PerspectiveCamera(85, innerWidth / innerHeight, 0.1, 1000);  // 視野角を広めに (引いた・遠めの見え方)
+    // 本家マイクラ準拠: 視野角(FOV) 70°
+    const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000);
+    // プレイヤーの目線高さ (足元から視点まで)。本家準拠の 1.62 ブロック
+    const PLAYER_EYE = 1.62;
     camera.position.set(96, 15, 96);  // 192×192 ワールドの中央
     // ベッドで設定したリスポーン地点があればそこから開始 (本家準拠: 死後はベッドから復活)
     const RESPAWN_SAVE_KEY = 'mc_respawn_v1';
@@ -1880,7 +1883,7 @@
     // 非同期生成中に足元へ固体ブロックを置いて埋めてしまうのを防ぐ
     function isPlayerVoxel(x, y, z) {
       if (Math.round(camera.position.x) !== x || Math.round(camera.position.z) !== z) return false;
-      const feetY = camera.position.y - 1.5;
+      const feetY = camera.position.y - PLAYER_EYE;
       return (y - 0.5) < camera.position.y - 0.05 && (y + 0.5) > feetY + 0.05;
     }
 
@@ -2252,7 +2255,7 @@
     const STEP_SMOOTH = 11;    // 段差の上り下りのイージング係数 (大きいほど速い/小さいほどふわっと)
     const STEP_DOWN_MAX = 1.3; // この高さまでの段差下りは自由落下せずふわっと降りる
 
-    // (x,z) で「現在の足元から STEP_HEIGHT 以内で届く最も高いブロック上面 + 身長 (1.5)」
+    // (x,z) で「現在の足元から STEP_HEIGHT 以内で届く最も高いブロック上面 + 目線高さ (PLAYER_EYE)」
     // refY を渡すとそのカメラ高さを基準にする (省略時は現在のカメラ位置)
     // 頭より上のブロック (天井) は床扱いしないので、トンネルも通れる
     // そのマスに当たり判定のあるブロックがあるか? (水は本家同様すり抜けるので床/壁にしない)
@@ -2265,11 +2268,11 @@
       if (refY === undefined) refY = camera.position.y;
       const px = Math.round(x);
       const pz = Math.round(z);
-      const maxReach = refY - 1.5 + STEP_HEIGHT + 0.05;  // 足元 + ステップ高
+      const maxReach = refY - PLAYER_EYE + STEP_HEIGHT + 0.05;  // 足元 + ステップ高
       for (let y = 20; y >= BEDROCK_Y; y--) {
         if (isSolidAt(px, y, pz)) {
           const blockTop = y + 0.5;
-          if (blockTop <= maxReach) return blockTop + 1.5;
+          if (blockTop <= maxReach) return blockTop + PLAYER_EYE;
         }
       }
       return -Infinity;
@@ -2279,7 +2282,7 @@
     function isTouchingLava() {
       const px = Math.round(camera.position.x);
       const pz = Math.round(camera.position.z);
-      const lo = Math.floor(camera.position.y - 1.5 - 0.5);  // 足元の下のブロック
+      const lo = Math.floor(camera.position.y - PLAYER_EYE - 0.5);  // 足元の下のブロック
       const hi = Math.ceil(camera.position.y);               // 頭まで
       for (let y = lo; y <= hi; y++) {
         const e = blocks.get(key(px, y, pz));
@@ -2298,7 +2301,7 @@
     function isBodyInWater() {
       const px = Math.round(camera.position.x);
       const pz = Math.round(camera.position.z);
-      const lo = Math.floor(camera.position.y - 1.5 + 0.1);
+      const lo = Math.floor(camera.position.y - PLAYER_EYE + 0.1);
       const hi = Math.round(camera.position.y);
       for (let y = lo; y <= hi; y++) {
         const e = blocks.get(key(px, y, pz));
@@ -2311,7 +2314,7 @@
     function hasCeiling(x, z, cameraY) {
       const px = Math.round(x);
       const pz = Math.round(z);
-      const feetY = cameraY - 1.5;
+      const feetY = cameraY - PLAYER_EYE;
       for (let y = Math.floor(feetY); y <= Math.ceil(cameraY); y++) {
         if (!isSolidAt(px, y, pz)) continue;
         const bb = y - 0.5;
@@ -5965,10 +5968,10 @@
     const timeTextEl = document.getElementById('time-text');
     const coordTextEl = document.getElementById('coord-text');
 
-    // プレイヤーの足元ブロック座標を HUD に表示 (視点は足元 +1.5)
+    // プレイヤーの足元ブロック座標を HUD に表示 (視点は足元 +PLAYER_EYE)
     function updateCoordHUD() {
       const cx = Math.round(camera.position.x);
-      const cy = Math.round(camera.position.y - 1.5);
+      const cy = Math.round(camera.position.y - PLAYER_EYE);
       const cz = Math.round(camera.position.z);
       coordTextEl.textContent = `${cx}, ${cy}, ${cz}`;
     }
