@@ -5532,8 +5532,8 @@
       { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true },
       // バブルスライム: ドラクエの毒スライム。スライム同様ぴょんぴょん跳ねる。スライムボールをドロップ
       { key: 'bubbleslime', file: '3D/バブルスライム.glb', height: 0.5, target: 8, speed: 1.4, hp: 8, facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, hop: true },
-      // トト: ボストンテリアの犬。友好的に歩き回る (ペット枠)
-      { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 4, speed: 1.5, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28 },
+      // トト: ボストンテリアの犬。友好的に歩き回る (ペット枠)。walk=歩行時に小走りアニメ
+      { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 4, speed: 1.5, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28, walk: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
@@ -5602,6 +5602,7 @@
       group.userData.visual = visual;                   // ホップ対象 (モデル本体)
       group.userData.visualBaseY = visual ? visual.position.y : 0;
       group.userData.hopPhase = Math.random() * Math.PI * 2;
+      group.userData.walkPhase = Math.random() * Math.PI * 2;  // 歩行アニメ(犬の小走り等)の位相
       group.userData.stepHopT = 0;                      // 段差ジャンプの残り時間
       group.userData.groundY = (y !== null ? y : 5);    // 論理的な接地高さ (実Yはこれへなめらかに追従)
       group.userData.soundTimer = 3 + Math.random() * 8;  // 村人アンビエント声の初回まで
@@ -5933,6 +5934,19 @@
           } else {
             // 歩行Mob (ブタ・村人・ニワトリ): 段差越えのときだけ小さくジャンプ
             h += mobStepHop(ud, dt, MOB_STEP_HOP, MOB_STEP_HOP_DUR);
+            // 歩行アニメ (def.walk=犬トト等): モデルが単一メッシュで脚を個別に動かせないため、
+            // 動いている間だけ体を上下に弾ませ前後に揺らして「小走り」に見せる
+            if (def.walk) {
+              const moving = (ud.state === 'walk' || ud.state === 'flee' || ud.state === 'aggro');
+              if (moving) {
+                ud.walkPhase += dt * 11;                              // 歩幅の速さ
+                h += Math.abs(Math.sin(ud.walkPhase)) * 0.09;        // 上下のバウンド (一歩ごと)
+                ud.visual.rotation.x = Math.sin(ud.walkPhase * 2) * 0.14;  // 前後のピッチ揺れ
+              } else if (ud.visual.rotation.x !== 0) {
+                ud.visual.rotation.x += (0 - ud.visual.rotation.x) * Math.min(1, dt * 8);  // 静止で水平へ戻す
+                if (Math.abs(ud.visual.rotation.x) < 0.005) ud.visual.rotation.x = 0;
+              }
+            }
           }
           ud.visual.position.y = ud.visualBaseY + h;
         }
