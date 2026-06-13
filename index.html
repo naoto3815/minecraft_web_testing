@@ -658,6 +658,156 @@
         "</svg>");
     }
 
+    // ===== 素材アイテムのアイコン (本家風のシンプルなSVGアイコン) =====
+    const _IC = (body) => svgDataURI("<svg xmlns='http://www.w3.org/2000/svg' width='256' height='256' viewBox='0 0 24 24'>" + body + "</svg>");
+    // 生肉/焼き肉: 肉の塊 + 骨。grill=true で焼き目、rot=true で腐敗の斑点
+    function meatIcon(fill, dark, grill, rot) {
+      let s = `<ellipse cx='13' cy='13' rx='7.5' ry='6' fill='${fill}' stroke='${dark}' stroke-width='1' transform='rotate(-18 13 13)'/>`;
+      s += `<rect x='3.5' y='4.2' width='5' height='2.3' rx='1.1' fill='#f2efe4' stroke='${dark}' stroke-width='0.5'/>`;
+      s += `<circle cx='3.8' cy='5.4' r='1.5' fill='#f2efe4' stroke='${dark}' stroke-width='0.5'/>`;
+      s += `<circle cx='3.8' cy='3.0' r='1.2' fill='#f2efe4' stroke='${dark}' stroke-width='0.5'/>`;
+      if (grill) { s += `<line x1='9' y1='11' x2='17' y2='15' stroke='${dark}' stroke-width='0.9' opacity='0.55'/><line x1='8' y1='14' x2='15' y2='17.5' stroke='${dark}' stroke-width='0.9' opacity='0.55'/>`; }
+      else { s += `<ellipse cx='10.5' cy='10.5' rx='2.4' ry='1.5' fill='#fff' opacity='0.22' transform='rotate(-18 10.5 10.5)'/>`; }
+      if (rot) { s += `<circle cx='12' cy='14' r='1.1' fill='${dark}' opacity='0.5'/><circle cx='16' cy='12' r='0.8' fill='${dark}' opacity='0.5'/>`; }
+      return _IC(s);
+    }
+    // 魚: 体 + 尾 + 目
+    function fishIcon(fill, dark) {
+      return _IC(
+        `<ellipse cx='11' cy='12.5' rx='7' ry='4.2' fill='${fill}' stroke='${dark}' stroke-width='1'/>` +
+        `<path d='M16.5 12.5 L22 8.5 L22 16.5 Z' fill='${fill}' stroke='${dark}' stroke-width='1'/>` +
+        `<circle cx='7' cy='11.5' r='1' fill='${dark}'/>` +
+        `<path d='M9 12.5 Q12 14.5 15 12.5' fill='none' stroke='${dark}' stroke-width='0.6' opacity='0.5'/>`);
+    }
+    // インゴット: 上面(明) + 前面(地色) の台形バー
+    function ingotIcon(fill, dark, light) {
+      return _IC(
+        `<path d='M6.5 8.5 L17.5 8.5 L15.5 11.5 L4.5 11.5 Z' fill='${light}' stroke='${dark}' stroke-width='0.9'/>` +
+        `<path d='M4.5 11.5 L15.5 11.5 L17 16.5 L6 16.5 Z' fill='${fill}' stroke='${dark}' stroke-width='0.9'/>` +
+        `<line x1='7' y1='13' x2='13' y2='13' stroke='${light}' stroke-width='0.8' opacity='0.7'/>`);
+    }
+    // 原石/石炭などの岩塊: ゴツゴツした多角形 + 斑点
+    function nuggetIcon(fill, dark, speckle) {
+      return _IC(
+        `<path d='M7 6.5 L13 5.5 L18.5 8.5 L19.5 14 L14 18.5 L7.5 17.5 L4.5 11.5 Z' fill='${fill}' stroke='${dark}' stroke-width='1'/>` +
+        `<circle cx='10' cy='10' r='1.4' fill='${speckle}'/><circle cx='14.5' cy='12.5' r='1.6' fill='${speckle}'/>` +
+        `<circle cx='11.5' cy='14.5' r='1.1' fill='${speckle}'/>`);
+    }
+    // 宝石: 面取りされたカット (上面の明るい三角 + 胴)
+    function gemIcon(fill, dark, light) {
+      return _IC(
+        `<path d='M12 3.5 L18.5 9.5 L12 20.5 L5.5 9.5 Z' fill='${fill}' stroke='${dark}' stroke-width='1'/>` +
+        `<path d='M12 3.5 L18.5 9.5 L12 9.5 L5.5 9.5 Z' fill='${light}' stroke='${dark}' stroke-width='0.6'/>` +
+        `<line x1='12' y1='9.5' x2='12' y2='20.5' stroke='${dark}' stroke-width='0.5' opacity='0.5'/>`);
+    }
+    // パン: 焼き色のついたロール + 切れ込み
+    function breadIcon() {
+      return _IC(
+        `<path d='M4 14.5 Q4 8 12 8 Q20 8 20 14.5 Q20 18 17.5 18 L6.5 18 Q4 18 4 14.5 Z' fill='#c08a45' stroke='#7a5326' stroke-width='1'/>` +
+        `<line x1='8' y1='10.5' x2='10' y2='13.5' stroke='#8a5f2e' stroke-width='0.9'/>` +
+        `<line x1='12' y1='10' x2='14' y2='13.5' stroke='#8a5f2e' stroke-width='0.9'/>` +
+        `<line x1='16' y1='10.5' x2='17.5' y2='13.5' stroke='#8a5f2e' stroke-width='0.9'/>`);
+    }
+    // 羽根
+    function featherIcon() {
+      return _IC(
+        `<path d='M19 4.5 Q9 5.5 6 16 Q5.2 19 8.5 18.5 Q16 15.5 19 6 Z' fill='#f4f4f4' stroke='#b0b0b0' stroke-width='0.9'/>` +
+        `<line x1='8' y1='18.5' x2='18.5' y2='5' stroke='#b8b8b8' stroke-width='0.9'/>`);
+    }
+    // 皮 (なめし革): いびつな毛皮のシルエット + ステッチ
+    function leatherIcon(fill, dark) {
+      return _IC(
+        `<path d='M5 8 L10 4.8 L16 6 L19.5 11 L15 18.5 L8 17.5 L3.8 12 Z' fill='${fill}' stroke='${dark}' stroke-width='1'/>` +
+        `<circle cx='9' cy='9' r='0.7' fill='${dark}'/><circle cx='13' cy='11' r='0.7' fill='${dark}'/><circle cx='11' cy='14' r='0.7' fill='${dark}'/>`);
+    }
+    // スライムボール: 半透明の緑の塊 + 光沢
+    function slimeballIcon() {
+      return _IC(
+        `<ellipse cx='12' cy='13' rx='7.5' ry='6.5' fill='#77c043' stroke='#4e8a2a' stroke-width='1'/>` +
+        `<ellipse cx='9' cy='9.5' rx='2.2' ry='1.5' fill='#fff' opacity='0.45'/>` +
+        `<ellipse cx='12' cy='14.5' rx='3.5' ry='2' fill='#5a9c30' opacity='0.5'/>`);
+    }
+    // 粉/火薬: 山盛りの粉 + 粒
+    function powderIcon(fill, dark) {
+      return _IC(
+        `<path d='M3.5 17.5 Q12 8.5 20.5 17.5 Z' fill='${fill}' stroke='${dark}' stroke-width='0.8'/>` +
+        `<circle cx='9' cy='15' r='0.8' fill='${dark}' opacity='0.6'/><circle cx='13' cy='14' r='0.8' fill='${dark}' opacity='0.6'/>` +
+        `<circle cx='15.5' cy='16' r='0.8' fill='${dark}' opacity='0.6'/>`);
+    }
+    // 種
+    function seedsIcon() {
+      return _IC(
+        `<ellipse cx='8.5' cy='10' rx='2' ry='3' fill='#9aae54' stroke='#5e6e2e' stroke-width='0.6' transform='rotate(-25 8.5 10)'/>` +
+        `<ellipse cx='14' cy='9' rx='2' ry='3' fill='#aabb64' stroke='#5e6e2e' stroke-width='0.6' transform='rotate(20 14 9)'/>` +
+        `<ellipse cx='11' cy='15' rx='2' ry='3' fill='#8aa048' stroke='#5e6e2e' stroke-width='0.6' transform='rotate(-5 11 15)'/>`);
+    }
+    // 小麦: 茎 + 穂
+    function wheatIcon() {
+      let s = `<line x1='12' y1='21' x2='12' y2='5' stroke='#b8923a' stroke-width='1.4'/>`;
+      for (let i = 0; i < 5; i++) {
+        const y = 6 + i * 2.6;
+        s += `<path d='M12 ${y+1.4} L8.5 ${y} M12 ${y+1.4} L15.5 ${y}' stroke='#e0b94c' stroke-width='1.4' stroke-linecap='round'/>`;
+      }
+      s += `<path d='M12 5.5 L9.5 3.5 M12 5.5 L14.5 3.5' stroke='#e0b94c' stroke-width='1.4' stroke-linecap='round'/>`;
+      return _IC(s);
+    }
+    // 苗木: 幹 + 葉のかたまり
+    function saplingIcon() {
+      return _IC(
+        `<rect x='11' y='13' width='2' height='6' fill='#6b4a2b'/>` +
+        `<circle cx='12' cy='9' r='4.5' fill='#4e8a3c' stroke='#356026' stroke-width='0.8'/>` +
+        `<circle cx='8.5' cy='11' r='3' fill='#5a9c44' stroke='#356026' stroke-width='0.8'/>` +
+        `<circle cx='15.5' cy='11' r='3' fill='#5a9c44' stroke='#356026' stroke-width='0.8'/>`);
+    }
+    // 矢: 柄 + 矢じり + 羽
+    function arrowIcon() {
+      return _IC(
+        `<line x1='5.5' y1='18.5' x2='16' y2='8' stroke='#9a7b4f' stroke-width='1.6'/>` +
+        `<path d='M14.5 4.5 L19.5 9.5 L13.5 9' fill='#cfcfcf' stroke='#3a3a3a' stroke-width='0.8'/>` +
+        `<path d='M4 20 L7.5 16.5 M6 21 L8.5 18.5 M3 18 L6 15.5' stroke='#e8e8e8' stroke-width='1' stroke-linecap='round'/>`);
+    }
+    // 骨
+    function boneIcon() {
+      return _IC(
+        `<rect x='7.5' y='10.5' width='9' height='3' rx='1.5' fill='#f2efe4' stroke='#c2bca8' stroke-width='0.7' transform='rotate(-25 12 12)'/>` +
+        `<circle cx='8' cy='9' r='2' fill='#f2efe4' stroke='#c2bca8' stroke-width='0.7'/><circle cx='6.3' cy='11' r='2' fill='#f2efe4' stroke='#c2bca8' stroke-width='0.7'/>` +
+        `<circle cx='16' cy='15' r='2' fill='#f2efe4' stroke='#c2bca8' stroke-width='0.7'/><circle cx='17.7' cy='13' r='2' fill='#f2efe4' stroke='#c2bca8' stroke-width='0.7'/>`);
+    }
+
+    const ITEM_ICONS = {
+      porkchop:    meatIcon('#e8907e', '#9c5040', false, false),
+      beef:        meatIcon('#c8554c', '#7a2e28', false, false),
+      chicken:     meatIcon('#e7b98a', '#a07440', false, false),
+      rabbitmeat:  meatIcon('#e08a6e', '#9c5038', false, false),
+      rottenflesh: meatIcon('#6e8a4c', '#3e5028', false, true),
+      cookedpork:  meatIcon('#b8753f', '#6e4520', true, false),
+      steak:       meatIcon('#8a4a2b', '#52260f', true, false),
+      cookedchicken: meatIcon('#c98e4e', '#7a4f22', true, false),
+      cookedrabbit:  meatIcon('#b0653a', '#6e3c1e', true, false),
+      rawfish:     fishIcon('#8fc4d6', '#3a6a7c'),
+      cookedfish:  fishIcon('#c9a86a', '#7a5e2e'),
+      bread:       breadIcon(),
+      feather:     featherIcon(),
+      leather:     leatherIcon('#8a5a2b', '#553418'),
+      rabbithide:  leatherIcon('#b98a5e', '#7a5634'),
+      slimeball:   slimeballIcon(),
+      gunpowder:   powderIcon('#6b6b6b', '#2e2e2e'),
+      bonemeal:    powderIcon('#f2efe2', '#bdb9a6'),
+      iron:        ingotIcon('#cfcfcf', '#7e7e7e', '#eeeeee'),
+      gold:        ingotIcon('#fcde3a', '#b8951a', '#fff39a'),
+      rawiron:     nuggetIcon('#b39a82', '#6e553a', '#e6ddd0'),
+      rawgold:     nuggetIcon('#bca56a', '#6e5a32', '#ffe45a'),
+      coal:        nuggetIcon('#3a3a3a', '#161616', '#111111'),
+      emerald:     gemIcon('#2ecc71', '#157a3e', '#86f0ac'),
+      diamond:     gemIcon('#4aedd9', '#1e9c8e', '#bafff6'),
+      echoshard:   gemIcon('#2bd1c4', '#157a72', '#a6fff2'),
+      seeds:       seedsIcon(),
+      wheat:       wheatIcon(),
+      sapling:     saplingIcon(),
+      arrow:       arrowIcon(),
+      bone:        boneIcon(),
+    };
+
     // ===== 素材アイテム (モブ撃破で手に入る。ブロックとは別管理) =====
     // food を持つ素材は選択して右クリックで食べると HP 回復。
     const MATERIAL_DEFS = [
@@ -712,7 +862,7 @@
     }
     const materialById = {};
     const materials = {};
-    MATERIAL_DEFS.forEach((m) => { m.icon = m.icon || matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
+    MATERIAL_DEFS.forEach((m) => { m.icon = m.icon || ITEM_ICONS[m.id] || matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
 
     // モブ別ドロップ表 (min..max 個を一様乱数で。0 を含むものは出ないこともある)
     const MOB_DROPS = {
