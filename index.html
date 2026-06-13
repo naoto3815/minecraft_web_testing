@@ -2045,9 +2045,11 @@
     // (x,y,z) がいまプレイヤーの体に重なる位置か? (立っている床は除外)
     // 非同期生成中に足元へ固体ブロックを置いて埋めてしまうのを防ぐ
     function isPlayerVoxel(x, y, z) {
-      if (Math.round(camera.position.x) !== x || Math.round(camera.position.z) !== z) return false;
+      // プレイヤーの体(半径0.3+余白)が触れ得る列・高さは地形生成しない(地下での埋まり=地上へ吹っ飛び防止)。
+      // 中心の列だけでなく境界付近の隣接列も保護し、体の高さも余白込みで覆う。
+      if (Math.abs(camera.position.x - x) > 0.6 || Math.abs(camera.position.z - z) > 0.6) return false;
       const feetY = camera.position.y - PLAYER_EYE;
-      return (y - 0.5) < camera.position.y - 0.05 && (y + 0.5) > feetY + 0.05;
+      return (y - 0.5) < camera.position.y + 0.3 && (y + 0.5) > feetY - 0.3;
     }
 
     // (x,y,z) に生成する鉱石 (なければ null)。座標決定論的 = 再生成しても同じ場所に出る。
@@ -2507,8 +2509,8 @@
       return false;
     }
 
-    // 体が固体ブロックに埋まったら(窒息・嵌り)、直上の空きスペースまで押し上げて救出する。
-    // 地形の非同期生成などで万一プレイヤーがブロックに閉じ込められても抜け出せるようにする安全網。
+    // 体が固体ブロックに埋まったら(窒息・嵌り)、すぐ上の空きへ少しだけ持ち上げて救出する安全網。
+    const UNSTICK_RESCUE_MAX = 3;   // この高さまでの空きにしか救出しない (地表まで打ち上げない)
     function unstickPlayer() {
       // 体が今いる列のブロックと重なっていなければ何もしない
       if (!hasCeiling(camera.position.x, camera.position.z, camera.position.y)) return;
@@ -2516,13 +2518,16 @@
       // 滑らかに持ち上げて解決する正常な状態。ここで +1 スナップ救出すると目標の床を
       // 行き過ぎてしまい、一段ごとに上へピョコンと跳ねて揺れて見える。
       // 登れる床へ向けて上昇中 (視点が床より下) なら救出せず、イージングに任せる。
+      // 地表まで一気に打ち上げない (地下で掘っている最中に勝手に地上へ飛ばされる不具合を防ぐ)。
+      // すぐ上(最大 RESCUE_MAX)に抜けられる空きがある時だけそこへ移す。深く埋まった異常時は据え置く。
       const floorY = getFloorY(camera.position.x, camera.position.z);
       if (floorY > -Infinity && camera.position.y < floorY) return;
-      let guard = 0;
-      // 体が抜ける高さまで 1 ブロックずつ持ち上げる (最初の空洞 or 地表で止まる)
-      while (hasCeiling(camera.position.x, camera.position.z, camera.position.y) && guard++ < 256) {
-        camera.position.y += 1;
+      let target = -1;
+      for (let d = 1; d <= UNSTICK_RESCUE_MAX; d++) {
+        if (!hasCeiling(camera.position.x, camera.position.z, camera.position.y + d)) { target = camera.position.y + d; break; }
       }
+      if (target < 0) return;  // 近くに空きなし(深く埋まった異常時) → 地表へ飛ばさず据え置き(掘って脱出)
+      camera.position.y = target;
       velocityY = 0;
       fallStartY = null;  // 救出による落下ダメージは無効化
     }
