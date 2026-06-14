@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14c ・ 村の南に探索ダンジョン追加</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14d ・ ダンジョンを迷路レイアウトに作り直し</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2048,13 +2048,15 @@
     }
 
     // ===== 探索ダンジョン (村の外・地下。スライム系のみ生息、奥にウォーデンのボス、撃破で扉→宝箱) =====
-    const DX0 = 86, DX1 = 106, DZ0 = 121, DZ1 = 184;  // 地表フットプリント (村の南)
+    // レイアウト: 村側(北)の階段で入り、蛇行する迷路を進むと最奥(南)の全幅ボス部屋。
+    // ボス部屋の南東の隅に宝物の小部屋があり、ボス撃破で扉(黒曜石)が開く。
+    const DX0 = 84, DX1 = 118, DZ0 = 121, DZ1 = 178;  // 地表フットプリント (村の南)
     const DUNGEON_ROOF_Y = 9;       // 地表(屋根)の高さ = 村と同じ平坦
     const DFLOOR_Y = -2;            // ダンジョンの床ブロックの y
     const DUNGEON_STAND_Y = DFLOOR_Y + 0.5;  // モブ/ボスの足元 (床の上面)
-    const DSTAIR_Z0 = 125;          // 入口階段の口 (ここから南へ降りる)
-    const DUNGEON_CHEST = { x: 96, y: -1, z: 181 };  // 宝箱の位置 (床の上)
-    const DBOSS = { x: 96, z: 172 };                  // ボス(ウォーデン)の出現位置
+    const DSTAIR_Z0 = 123;          // 入口階段の口 (村の南門のすぐ先。ここから南へ降りる)
+    const DUNGEON_CHEST = { x: 114, y: -1, z: 174 };  // 宝箱 (ボス部屋南東の宝物小部屋)
+    const DBOSS = { x: 100, z: 165 };                 // ボス(ウォーデン)の出現位置 (ボス部屋中央)
     const dungeonColumns = new Map();   // "x,z" → { air:Set<y>, set:Map<y,t> }
     const dungeonTorches = [];          // {x,y,z} 初期化時に placeTorch
     const dungeonGateCells = new Set(); // "x,y,z" ボス前の扉(黒曜石)。撃破で開く
@@ -2070,37 +2072,39 @@
     function saveDungeonState() { try { localStorage.setItem(DUNGEON_SAVE_KEY, JSON.stringify({ bossDefeated: dungeonBossDefeated })); } catch (err) { /* 無視 */ } }
 
     function buildDungeonBlueprint() {
-      // --- 入口の階段 (地表 y9 から床 y-2 へ南へ降りる。3マス幅の竪トレンチ) ---
+      // --- 入口の階段 (村側=北。地表 y9 から床 y-2 へ南へ降りる。5マス幅) ---
       for (let s = 0; s <= 10; s++) {
-        const zz = DSTAIR_Z0 + s;                 // 125..135
+        const zz = DSTAIR_Z0 + s;                 // 123..133
         const sy = (DUNGEON_ROOF_Y - 1) - s;      // 8..-2
-        for (let x = 95; x <= 97; x++) {
+        for (let x = 95; x <= 99; x++) {
           dSet(x, sy, zz, STONE_INDEX);           // 踏み板
           const c = dCol(x, zz);
           for (let y = sy + 1; y <= DUNGEON_ROOF_Y + 1; y++) c.air.add(y);  // 上を開ける
         }
       }
-      // --- 各部屋・通路を掘る ---
-      dCarve(90, 102, -1, 2, 136, 148);  // 入口ホール
-      dCarve(94, 98, -1, 2, 148, 154);   // 通路1
-      dCarve(88, 104, -1, 2, 154, 164);  // 中間チャンバー
-      dCarve(94, 98, -1, 2, 164, 166);   // 通路2
-      dCarve(86, 106, -1, 4, 166, 178);  // ボス部屋 (天井高め)
-      dCarve(95, 97, -1, 2, 178, 179);   // ボス→宝物への通路(扉の位置)
-      dCarve(92, 100, -1, 3, 179, 183);  // 宝物部屋
-      // --- 中間チャンバーの石柱 (洞窟感・隠れ場所) ---
-      for (const [px, pz] of [[92, 157], [100, 157], [92, 161], [100, 161], [96, 159]]) {
+      // --- 蛇行する迷路の通路 (床y-2, 空洞y-1..2)。階段→東→南→西→南→ボス部屋 ---
+      dCarve(88, 113, -1, 2, 132, 138);  // C1 北の横通路 (階段の続き → 東へ)
+      dCarve(108, 113, -1, 2, 138, 153); // C2 東側を南下
+      dCarve(88, 113, -1, 2, 150, 155);  // C3 中段の横通路 (東 → 西へ)
+      dCarve(88, 93, -1, 2, 155, 162);   // C4 西側を南下 → ボス部屋へ
+      // --- ボス部屋 (最奥・全幅・天井高め) ---
+      dCarve(84, 118, -1, 4, 160, 169);
+      // --- 宝物の小部屋 (ボス部屋の南東。扉で仕切る) ---
+      dCarve(112, 117, -1, 2, 171, 177);
+      // ボス部屋⇄宝物部屋の扉の開口 (z170, x113..115) を空け、黒曜石の扉で塞ぐ
+      for (let x = 113; x <= 115; x++) { const c = dCol(x, 170); for (let y = -1; y <= 2; y++) { c.air.add(y); c.set.delete(y); } }
+      for (let x = 113; x <= 115; x++) for (let y = -1; y <= 2; y++) dungeonGateCells.add(x + ',' + y + ',' + 170);
+      // --- 石柱 (中段・ボス部屋に点在。洞窟感) ---
+      for (const [px, pz] of [[100, 152], [92, 164], [108, 164], [92, 167], [108, 167]]) {
         for (let y = -1; y <= 2; y++) dSet(px, y, pz, STONE_INDEX);
       }
-      // --- ボス前の扉 (黒曜石。ボス未討伐の間だけ塞ぐ) ---
-      for (let x = 95; x <= 97; x++) for (let y = -1; y <= 2; y++) dungeonGateCells.add(x + ',' + y + ',' + 178);
       // --- 宝箱 (床の上 = y-1) ---
       dSet(DUNGEON_CHEST.x, DUNGEON_CHEST.y, DUNGEON_CHEST.z, CHEST_INDEX);
-      // --- 灯り (入口・ボス部屋・宝物のみ。通路は暗くしてスライムを湧かせる) ---
+      // --- 灯り (入口・分岐・ボス部屋・宝物。通路の一部は暗くしてスライムを湧かせる) ---
       dungeonTorches.push(
-        { x: 96, y: 0, z: 140 }, { x: 91, y: 0, z: 147 }, { x: 101, y: 0, z: 147 },
-        { x: 88, y: 1, z: 168 }, { x: 104, y: 1, z: 168 },
-        { x: 93, y: 0, z: 182 }, { x: 99, y: 0, z: 182 }
+        { x: 97, y: 0, z: 135 }, { x: 111, y: 0, z: 145 }, { x: 90, y: 0, z: 153 },
+        { x: 88, y: 1, z: 163 }, { x: 116, y: 1, z: 163 }, { x: 100, y: 1, z: 162 },
+        { x: 114, y: 0, z: 176 }
       );
       // --- 宝箱の中身 (未取得なら豪華な戦利品をセット) ---
       const tk = DUNGEON_CHEST.x + ',' + DUNGEON_CHEST.y + ',' + DUNGEON_CHEST.z;
@@ -2145,7 +2149,7 @@
 
     // (x,z) が洞窟内のスライム湧きに適した床セルか (部屋の空洞・宝物部屋は除外)
     function isCaveSpawnCell(x, z) {
-      if (z >= 178) return false;  // 扉/宝物エリアには湧かせない
+      if (z >= 159) return false;  // ボス部屋・扉・宝物エリアには湧かせない (通路のみ)
       const c = dungeonColumns.get(x + ',' + z);
       if (!c || !c.air.has(0) || !c.air.has(-1)) return false;  // 開けた部屋の床のみ
       const dx = x - camera.position.x, dz = z - camera.position.z;
@@ -4929,7 +4933,7 @@
       if (dungeonBoss && wardens.indexOf(dungeonBoss) === -1) dungeonBoss = null;  // 死亡/消滅
       if (dungeonBossDefeated) return;
       const p = camera.position;
-      const nearChamber = inDungeon(p.x, p.z) && p.y < 5 && p.z > 160;
+      const nearChamber = inDungeon(p.x, p.z) && p.y < 5 && p.z > 155;
       if (nearChamber && !dungeonBoss) {
         spawnWarden(DBOSS.x, DBOSS.z, DUNGEON_STAND_Y);
         dungeonBoss = wardens[wardens.length - 1] || null;
