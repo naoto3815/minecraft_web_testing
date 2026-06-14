@@ -3794,6 +3794,10 @@
     const WARDEN_HEIGHT = 2.9;           // 当たり判定の高さ (本家: 2.9)
     const WARDEN_RADIUS = WARDEN_WIDTH / 2;
     const WARDEN_FACING_OFFSET = 0;      // モデルの正面が逆なら Math.PI
+    // GLB の見た目に合わせた当たり判定の半径 (ロード時に実寸から算出して上書き)
+    let wardenHalfW = WARDEN_RADIUS;     // ローカルX方向の半幅
+    let wardenHalfD = WARDEN_RADIUS;     // ローカルZ方向の半奥行
+    let wardenBoxCX = 0, wardenBoxCZ = 0; // モデルの水平中心オフセット
     const WARDEN_HP = 140;               // 非常にタフ (剣でも数十発)
     const WARDEN_SPEED = 3.5;            // 速い。歩きでは引き離せず、ダッシュでやっと逃げられる
     const WARDEN_STEP_HEIGHT = 1.2;      // 登れる段差
@@ -3820,11 +3824,15 @@
 
     // プレイヤー位置がいずれかのウォーデンと重なるか? (体当たりすり抜け防止)
     function isOverlappingWarden(x, z, y) {
-      const combined = PLAYER_RADIUS + WARDEN_RADIUS;
       for (const w of wardens) {
         const dy = y - w.position.y;
         if (dy < -0.4 || dy > WARDEN_HEIGHT + 1.0) continue;
-        if (Math.abs(x - w.position.x) < combined && Math.abs(z - w.position.z) < combined) return true;
+        // プレイヤー位置をウォーデンのローカル(回転前)座標へ変換し、見た目のfootprint矩形と判定
+        const c = Math.cos(w.rotation.y), s = Math.sin(w.rotation.y);
+        const dx = x - w.position.x, dz = z - w.position.z;
+        const lx = (dx * c - dz * s) - wardenBoxCX;
+        const lz = (dx * s + dz * c) - wardenBoxCZ;
+        if (Math.abs(lx) < wardenHalfW + PLAYER_RADIUS && Math.abs(lz) < wardenHalfD + PLAYER_RADIUS) return true;
       }
       return false;
     }
@@ -3844,9 +3852,9 @@
           obj.userData.origColors = [obj.material.color.clone()];
         }
       });
-      // 不可視ボックスコライダ (クリック判定 = 本家準拠サイズ)
-      const collider = new THREE.Mesh(new THREE.BoxGeometry(WARDEN_WIDTH, WARDEN_HEIGHT, WARDEN_WIDTH), _wardenColliderMat);
-      collider.position.y = WARDEN_HEIGHT / 2;
+      // 不可視ボックスコライダ (クリック判定 = 見た目の大きさに合わせる)
+      const collider = new THREE.Mesh(new THREE.BoxGeometry(wardenHalfW * 2, WARDEN_HEIGHT, wardenHalfD * 2), _wardenColliderMat);
+      collider.position.set(wardenBoxCX, WARDEN_HEIGHT / 2, wardenBoxCZ);
       collider.visible = false;
       collider.userData.wardenGroup = group;
       group.add(collider);
@@ -4242,6 +4250,11 @@
         if (size.y > 0) model.scale.setScalar(WARDEN_HEIGHT / size.y);  // 高さ2.9マスに正規化
         model.updateMatrixWorld();
         const box2 = new THREE.Box3().setFromObject(model);
+        // 見た目の水平footprintを当たり判定に反映 (横長GLBでも体にめり込まないように)
+        const sz2 = box2.getSize(new THREE.Vector3());
+        const ctr2 = box2.getCenter(new THREE.Vector3());
+        wardenHalfW = sz2.x / 2; wardenHalfD = sz2.z / 2;
+        wardenBoxCX = ctr2.x; wardenBoxCZ = ctr2.z;
         model.position.y -= box2.min.y;  // 足元 = y=0
         model.rotation.y = WARDEN_FACING_OFFSET;
         const wrapper = new THREE.Group();
