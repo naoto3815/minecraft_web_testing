@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14e ・ ゲームオーバー曲をYouTubeに</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14f ・ 洞窟の松明を壁掛けに / 石柱を撤去</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2087,24 +2087,31 @@
       dCarve(108, 113, -1, 2, 138, 153); // C2 東側を南下
       dCarve(88, 113, -1, 2, 150, 155);  // C3 中段の横通路 (東 → 西へ)
       dCarve(88, 93, -1, 2, 155, 162);   // C4 西側を南下 → ボス部屋へ
-      // --- ボス部屋 (最奥・全幅・天井高め) ---
-      dCarve(84, 118, -1, 4, 160, 169);
+      // --- ボス部屋 (最奥・天井高め。フットプリント端から1マス内側に寄せ、石壁を確保) ---
+      dCarve(86, 116, -1, 4, 160, 169);
       // --- 宝物の小部屋 (ボス部屋の南東。扉で仕切る) ---
       dCarve(112, 117, -1, 2, 171, 177);
       // ボス部屋⇄宝物部屋の扉の開口 (z170, x113..115) を空け、黒曜石の扉で塞ぐ
       for (let x = 113; x <= 115; x++) { const c = dCol(x, 170); for (let y = -1; y <= 2; y++) { c.air.add(y); c.set.delete(y); } }
       for (let x = 113; x <= 115; x++) for (let y = -1; y <= 2; y++) dungeonGateCells.add(x + ',' + y + ',' + 170);
-      // --- 石柱 (中段・ボス部屋に点在。洞窟感) ---
-      for (const [px, pz] of [[100, 152], [92, 164], [108, 164], [92, 167], [108, 167]]) {
-        for (let y = -1; y <= 2; y++) dSet(px, y, pz, STONE_INDEX);
-      }
       // --- 宝箱 (床の上 = y-1) ---
       dSet(DUNGEON_CHEST.x, DUNGEON_CHEST.y, DUNGEON_CHEST.z, CHEST_INDEX);
-      // --- 灯り (入口・分岐・ボス部屋・宝物。通路の一部は暗くしてスライムを湧かせる) ---
+      // --- 灯り (壁掛け。n = 壁→空洞へ向かう法線 = 松明セルから見て壁は cell-n 側)。
+      //     通路の一部は暗くしてスライムを湧かせる ---
       dungeonTorches.push(
-        { x: 97, y: 0, z: 135 }, { x: 111, y: 0, z: 145 }, { x: 90, y: 0, z: 153 },
-        { x: 88, y: 1, z: 163 }, { x: 116, y: 1, z: 163 }, { x: 100, y: 1, z: 162 },
-        { x: 114, y: 0, z: 176 }
+        { x: 90, y: 0, z: 132, n: { x: 0, z: 1 } },   // C1 北壁(z131)
+        { x: 110, y: 0, z: 132, n: { x: 0, z: 1 } },  // C1 北壁(z131)
+        { x: 113, y: 0, z: 145, n: { x: -1, z: 0 } }, // C2 東壁(x114)
+        { x: 108, y: 0, z: 148, n: { x: 1, z: 0 } },  // C2 西壁(x107)
+        { x: 100, y: 0, z: 155, n: { x: 0, z: -1 } }, // C3 南壁(z156)
+        { x: 95, y: 0, z: 150, n: { x: 0, z: 1 } },   // C3 北壁(z149)
+        { x: 88, y: 0, z: 158, n: { x: 1, z: 0 } },   // C4 西壁(x87)
+        { x: 86, y: 1, z: 164, n: { x: 1, z: 0 } },   // ボス部屋 西壁(x85)
+        { x: 116, y: 1, z: 164, n: { x: -1, z: 0 } }, // ボス部屋 東壁(x117)
+        { x: 100, y: 1, z: 160, n: { x: 0, z: 1 } },  // ボス部屋 北壁(z159)
+        { x: 90, y: 0, z: 169, n: { x: 0, z: -1 } },  // ボス部屋 南壁(z170)
+        { x: 117, y: 0, z: 174, n: { x: -1, z: 0 } }, // 宝物部屋 東壁(x118)
+        { x: 114, y: 0, z: 177, n: { x: 0, z: -1 } }  // 宝物部屋 南壁(z178)
       );
       // --- 宝箱の中身 (未取得なら豪華な戦利品をセット) ---
       const tk = DUNGEON_CHEST.x + ',' + DUNGEON_CHEST.y + ',' + DUNGEON_CHEST.z;
@@ -3385,8 +3392,8 @@
 
     // 村の灯り (街灯・室内の松明) を設置。プレイヤーのセーブには残さない(skipSave)
     for (const t of villageTorches) placeTorch(t.x, t.y, t.z, null, true);
-    // ダンジョンの灯り (入口・ボス部屋・宝物。通路は暗いままにしてスライムを湧かせる)
-    for (const t of dungeonTorches) placeTorch(t.x, t.y, t.z, null, true);
+    // ダンジョンの灯り (壁掛け。t.n = 壁→空洞の法線)。通路は暗いままにしてスライムを湧かせる
+    for (const t of dungeonTorches) placeTorch(t.x, t.y, t.z, t.n ? { x: t.n.x, y: 0, z: t.n.z } : null, true);
 
     // ===== トースト表示 (画面下部の一時メッセージ) =====
     const toastEl = document.getElementById('toast');
