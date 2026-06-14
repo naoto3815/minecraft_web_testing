@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14d ・ ダンジョンを迷路レイアウトに作り直し</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14e ・ ゲームオーバー曲をYouTubeに</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2602,10 +2602,59 @@
     bgm.volume = 0.3;
     let bgmMuted = false;
 
-    // ゲームオーバー用BGM (ループしない一発もの)
+    // ゲームオーバー用BGM (ループしない一発もの。YouTube曲のフォールバック)
     const gameOverBGM = new Audio('BGM/game_over.mp3');
     gameOverBGM.loop = false;
     gameOverBGM.volume = 0.6;
+
+    // ゲームオーバー時に流す曲 (ユーザー指定の YouTube 動画)。
+    // YouTube 公式の IFrame Player API でストリーミング再生する正規の埋め込み
+    // (音源の保存/抽出はしない)。再生できない環境では上の gameOverBGM にフォールバック。
+    const GAMEOVER_YT_ID = 'Uf2zTPmjTqE';
+    let ytGameOver = null;
+    let ytGameOverReady = false;
+    (function setupGameOverYouTube() {
+      // 隠しプレーヤー用 div (display:none だと再生されない環境があるので画面外に置く)
+      const div = document.createElement('div');
+      div.id = 'gameover-yt';
+      div.style.cssText = 'position:fixed;left:-9999px;top:0;width:240px;height:135px;pointer-events:none;';
+      document.body.appendChild(div);
+      function createPlayer() {
+        if (ytGameOver || !(window.YT && window.YT.Player)) return;
+        ytGameOver = new YT.Player('gameover-yt', {
+          videoId: GAMEOVER_YT_ID,
+          playerVars: { controls: 0, disablekb: 1, playsinline: 1, rel: 0, fs: 0, modestbranding: 1 },
+          events: {
+            onReady: () => { ytGameOverReady = true; },
+            onError: () => {  // 地域制限/削除など → ゲームオーバー中なら従来BGMにフォールバック
+              const go = document.getElementById('gameover');
+              if (go && go.classList.contains('show')) {
+                try { gameOverBGM.currentTime = 0; gameOverBGM.play().catch(() => playGameOverMusic()); }
+                catch (e) { playGameOverMusic(); }
+              }
+            },
+          },
+        });
+      }
+      // API のロード順に依存しないよう、グローバルコールバックとポーリングの両方で待つ
+      window.onYouTubeIframeAPIReady = createPlayer;
+      const poll = setInterval(() => { if (window.YT && window.YT.Player) { clearInterval(poll); createPlayer(); } }, 400);
+      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(tag);
+      }
+    })();
+
+    // ゲームオーバー曲(YouTube)を頭から再生。再生開始できたら true。ミュート中は鳴らさず true。
+    function playGameOverYouTube() {
+      if (bgmMuted) return true;
+      if (ytGameOver && ytGameOverReady) {
+        try { ytGameOver.seekTo(0, true); ytGameOver.unMute(); ytGameOver.setVolume(60); ytGameOver.playVideo(); return true; }
+        catch (e) { return false; }
+      }
+      return false;
+    }
 
     // クリック開始で再生、Esc解除で一時停止
     controls.addEventListener('lock', () => {
@@ -6878,12 +6927,14 @@
         controls.unlock();
         gameoverEl.classList.add('show');
         bgm.pause();
-        // 本物のmp3があれば再生、無ければメタルギア風の合成BGMにフォールバック
-        try {
-          gameOverBGM.currentTime = 0;
-          gameOverBGM.play().catch(() => playGameOverMusic());
-        } catch (e) {
-          playGameOverMusic();
+        // ユーザー指定の YouTube 曲を再生。未準備/失敗時は mp3 → 合成BGM にフォールバック
+        if (!playGameOverYouTube()) {
+          try {
+            gameOverBGM.currentTime = 0;
+            gameOverBGM.play().catch(() => playGameOverMusic());
+          } catch (e) {
+            playGameOverMusic();
+          }
         }
       }
     }
