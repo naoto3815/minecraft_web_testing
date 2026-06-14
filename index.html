@@ -2,6 +2,10 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
+  <!-- ブラウザがHTMLを古いまま再利用しない (更新が確実に届くように) -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>マインクラフト風プロトタイプ</title>
   <style>
     body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif; background: #87CEEB; }
@@ -303,7 +307,8 @@
     WASD: 移動  /  Space: ジャンプ<br>
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
-    1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止
+    1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14b ・ 村のクレーター自動修復</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
