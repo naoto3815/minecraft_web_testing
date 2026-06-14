@@ -2149,9 +2149,13 @@
         const ev = edits.get(ck);
         if (ev) {
           for (const [bk, val] of ev) {
+            // 村内では「破壊(クレーター)」は復元 = 無視し、平らな地面/建物を保つ。
+            // TNT等で掘れた穴はリロードで自然に埋まる。設置(val>=0)だけ反映するので
+            // 村に自分で建てたものは残る。
+            if (val < 0) continue;
             const [bx, by, bz] = bk.split(',').map(Number);
             removeBlock(bx, by, bz);
-            if (val >= 0 && addBlock(bx, by, bz, val)) keys.push(bk);
+            if (addBlock(bx, by, bz, val)) keys.push(bk);
           }
         }
         loadedColumns.set(ck, keys);
@@ -2409,6 +2413,7 @@
       list.sort((a, b) => a.d2 - b.d2);
       for (const c of list) generateColumn(c.cx, c.cz);
     })();
+
 
     // 初期スポーン位置を実際の地面に合わせる (初期落下を防ぐ)
     camera.position.y = terrainHeight(SPAWN_CX, SPAWN_CZ) + 2;
