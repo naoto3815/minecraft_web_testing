@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14b ・ 村のクレーター自動修復</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14c ・ 村の南に探索ダンジョン追加</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2047,6 +2047,111 @@
       else if (addBlock(cx, VILLAGE_Y, cz, 0)) keys.push(key(cx, VILLAGE_Y, cz));
     }
 
+    // ===== 探索ダンジョン (村の外・地下。スライム系のみ生息、奥にウォーデンのボス、撃破で扉→宝箱) =====
+    const DX0 = 86, DX1 = 106, DZ0 = 121, DZ1 = 184;  // 地表フットプリント (村の南)
+    const DUNGEON_ROOF_Y = 9;       // 地表(屋根)の高さ = 村と同じ平坦
+    const DFLOOR_Y = -2;            // ダンジョンの床ブロックの y
+    const DUNGEON_STAND_Y = DFLOOR_Y + 0.5;  // モブ/ボスの足元 (床の上面)
+    const DSTAIR_Z0 = 125;          // 入口階段の口 (ここから南へ降りる)
+    const DUNGEON_CHEST = { x: 96, y: -1, z: 181 };  // 宝箱の位置 (床の上)
+    const DBOSS = { x: 96, z: 172 };                  // ボス(ウォーデン)の出現位置
+    const dungeonColumns = new Map();   // "x,z" → { air:Set<y>, set:Map<y,t> }
+    const dungeonTorches = [];          // {x,y,z} 初期化時に placeTorch
+    const dungeonGateCells = new Set(); // "x,y,z" ボス前の扉(黒曜石)。撃破で開く
+    function inDungeon(x, z) { return x >= DX0 && x <= DX1 && z >= DZ0 && z <= DZ1; }
+    function dCol(x, z) { const k = x + ',' + z; let c = dungeonColumns.get(k); if (!c) { c = { air: new Set(), set: new Map() }; dungeonColumns.set(k, c); } return c; }
+    function dCarve(x0, x1, y0, y1, z0, z1) { for (let x = x0; x <= x1; x++) for (let z = z0; z <= z1; z++) { const c = dCol(x, z); for (let y = y0; y <= y1; y++) { c.air.add(y); c.set.delete(y); } } }
+    function dSet(x, y, z, t) { const c = dCol(x, z); c.set.set(y, t); c.air.delete(y); }
+
+    // ボス討伐の進行状況 (localStorage に保存。扉の開閉に使う)
+    const DUNGEON_SAVE_KEY = 'mc_dungeon_v1';
+    let dungeonBossDefeated = false;
+    try { const _ds = JSON.parse(localStorage.getItem(DUNGEON_SAVE_KEY)); if (_ds && _ds.bossDefeated) dungeonBossDefeated = true; } catch (err) { /* 無視 */ }
+    function saveDungeonState() { try { localStorage.setItem(DUNGEON_SAVE_KEY, JSON.stringify({ bossDefeated: dungeonBossDefeated })); } catch (err) { /* 無視 */ } }
+
+    function buildDungeonBlueprint() {
+      // --- 入口の階段 (地表 y9 から床 y-2 へ南へ降りる。3マス幅の竪トレンチ) ---
+      for (let s = 0; s <= 10; s++) {
+        const zz = DSTAIR_Z0 + s;                 // 125..135
+        const sy = (DUNGEON_ROOF_Y - 1) - s;      // 8..-2
+        for (let x = 95; x <= 97; x++) {
+          dSet(x, sy, zz, STONE_INDEX);           // 踏み板
+          const c = dCol(x, zz);
+          for (let y = sy + 1; y <= DUNGEON_ROOF_Y + 1; y++) c.air.add(y);  // 上を開ける
+        }
+      }
+      // --- 各部屋・通路を掘る ---
+      dCarve(90, 102, -1, 2, 136, 148);  // 入口ホール
+      dCarve(94, 98, -1, 2, 148, 154);   // 通路1
+      dCarve(88, 104, -1, 2, 154, 164);  // 中間チャンバー
+      dCarve(94, 98, -1, 2, 164, 166);   // 通路2
+      dCarve(86, 106, -1, 4, 166, 178);  // ボス部屋 (天井高め)
+      dCarve(95, 97, -1, 2, 178, 179);   // ボス→宝物への通路(扉の位置)
+      dCarve(92, 100, -1, 3, 179, 183);  // 宝物部屋
+      // --- 中間チャンバーの石柱 (洞窟感・隠れ場所) ---
+      for (const [px, pz] of [[92, 157], [100, 157], [92, 161], [100, 161], [96, 159]]) {
+        for (let y = -1; y <= 2; y++) dSet(px, y, pz, STONE_INDEX);
+      }
+      // --- ボス前の扉 (黒曜石。ボス未討伐の間だけ塞ぐ) ---
+      for (let x = 95; x <= 97; x++) for (let y = -1; y <= 2; y++) dungeonGateCells.add(x + ',' + y + ',' + 178);
+      // --- 宝箱 (床の上 = y-1) ---
+      dSet(DUNGEON_CHEST.x, DUNGEON_CHEST.y, DUNGEON_CHEST.z, CHEST_INDEX);
+      // --- 灯り (入口・ボス部屋・宝物のみ。通路は暗くしてスライムを湧かせる) ---
+      dungeonTorches.push(
+        { x: 96, y: 0, z: 140 }, { x: 91, y: 0, z: 147 }, { x: 101, y: 0, z: 147 },
+        { x: 88, y: 1, z: 168 }, { x: 104, y: 1, z: 168 },
+        { x: 93, y: 0, z: 182 }, { x: 99, y: 0, z: 182 }
+      );
+      // --- 宝箱の中身 (未取得なら豪華な戦利品をセット) ---
+      const tk = DUNGEON_CHEST.x + ',' + DUNGEON_CHEST.y + ',' + DUNGEON_CHEST.z;
+      if (!chestData[tk]) {
+        chestData[tk] = { blocks: { [OBSIDIAN_INDEX]: 10 }, mats: { diamond: 5, gold: 8, iron: 16, emerald: 6 }, tnt: 16 };
+        saveChests();
+      }
+    }
+
+    // ダンジョン1列を生成: 平らな屋根 + 掘り抜いた部屋 + 壁/床/天井(石) + 特殊ブロック
+    function generateDungeonColumn(cx, cz, keys) {
+      const c = dungeonColumns.get(cx + ',' + cz);
+      const air = c ? c.air : null;
+      const special = c ? c.set : null;
+      for (let y = DUNGEON_ROOF_Y; y >= BEDROCK_Y; y--) {
+        if (air && air.has(y)) {
+          // 掘り抜いた空間。ボス前の扉セルはボス未討伐なら黒曜石で塞ぐ
+          if (!dungeonBossDefeated && dungeonGateCells.has(cx + ',' + y + ',' + cz)) {
+            if (addBlock(cx, y, cz, OBSIDIAN_INDEX)) keys.push(key(cx, y, cz));
+          }
+          continue;
+        }
+        const sp = special ? special.get(y) : undefined;
+        if (sp !== undefined) { if (addBlock(cx, y, cz, sp)) keys.push(key(cx, y, cz)); continue; }
+        if (y === BEDROCK_Y) { if (addBlock(cx, y, cz, OBSIDIAN_INDEX)) keys.push(key(cx, y, cz)); continue; }
+        let t;
+        if (y === DUNGEON_ROOF_Y) t = GRASS_INDEX;          // 屋根の草 (村と地続き)
+        else if (y >= DUNGEON_ROOF_Y - 2) t = DIRT_INDEX;   // 土
+        else t = STONE_INDEX;                               // 石 (壁・天井・床)
+        if (addBlock(cx, y, cz, t)) keys.push(key(cx, y, cz));
+      }
+      // プレイヤーの改変 (掘った/置いた) を反映 (洞窟は採掘可)
+      const e = edits.get(colKey(cx, cz));
+      if (e) {
+        for (const [bk, val] of e) {
+          const [bx, by, bz] = bk.split(',').map(Number);
+          removeBlock(bx, by, bz);
+          if (val >= 0 && addBlock(bx, by, bz, val)) keys.push(bk);
+        }
+      }
+    }
+
+    // (x,z) が洞窟内のスライム湧きに適した床セルか (部屋の空洞・宝物部屋は除外)
+    function isCaveSpawnCell(x, z) {
+      if (z >= 178) return false;  // 扉/宝物エリアには湧かせない
+      const c = dungeonColumns.get(x + ',' + z);
+      if (!c || !c.air.has(0) || !c.air.has(-1)) return false;  // 開けた部屋の床のみ
+      const dx = x - camera.position.x, dz = z - camera.position.z;
+      return (dx * dx + dz * dz) >= 16;  // プレイヤー直上には湧かせない
+    }
+
     function terrainHeight(x, z) {
       // 4オクターブのフラクタルノイズ (amplitude 1/2 ずつ、freq 2倍ずつ)
       let h = 0;
@@ -2166,6 +2271,12 @@
         loadedColumns.set(ck, keys);
         return;
       }
+      // ダンジョン範囲は専用の構造を生成 (通常の地形/地中生成はスキップ)
+      if (inDungeon(cx, cz)) {
+        generateDungeonColumn(cx, cz, keys);
+        loadedColumns.set(ck, keys);
+        return;
+      }
       const h = terrainHeight(cx, cz);
       const surface = getSurfaceType(cx, cz);
       if (addBlock(cx, h,     cz, surface)) keys.push(key(cx, h, cz));     // 表面
@@ -2248,6 +2359,7 @@
     function generateDeepColumn(cx, cz) {
       const ck = colKey(cx, cz);
       if (deepLoaded.has(ck)) return;
+      if (inDungeon(cx, cz)) { deepLoaded.set(ck, []); return; }  // ダンジョンは generateDungeonColumn が全層生成済み
       if (!loadedColumns.has(ck)) generateColumn(cx, cz);  // 地表が未生成なら先に
       const h = terrainHeight(cx, cz);
       const keys = [];
@@ -2404,6 +2516,8 @@
 
     // 村のブループリントを構築 (initialLoad より前。generateColumn が参照する)
     buildVillageBlueprint();
+    // 探索ダンジョンのブループリントを構築 (村と同じく generateColumn が参照する)
+    buildDungeonBlueprint();
 
     // 起動時: スポーン周囲をまとめて生成 (以降は移動に応じてストリーミング)
     (function initialLoad() {
@@ -3218,6 +3332,8 @@
 
     // 村の灯り (街灯・室内の松明) を設置。プレイヤーのセーブには残さない(skipSave)
     for (const t of villageTorches) placeTorch(t.x, t.y, t.z, null, true);
+    // ダンジョンの灯り (入口・ボス部屋・宝物。通路は暗いままにしてスライムを湧かせる)
+    for (const t of dungeonTorches) placeTorch(t.x, t.y, t.z, null, true);
 
     // ===== トースト表示 (画面下部の一時メッセージ) =====
     const toastEl = document.getElementById('toast');
@@ -3477,9 +3593,19 @@
       }, undefined, () => {});
     });
 
-    function creeperGroundY(x, z) {
+    // fromY を渡すと、その高さ以下で「上が空いている接地面」を返す (洞窟など多層地形で、
+    // 屋根ではなくモブが今いる階層の床を拾い、かつ垂直な壁を1段ずつ登って脱出するのを防ぐ)。
+    // 省略時は上空(20)から最初の固体の上面 = 最上面 (スポーン/アイテム落下などで使用)。
+    function creeperGroundY(x, z, fromY) {
       const px = Math.round(x);
       const pz = Math.round(z);
+      if (fromY !== undefined) {
+        const startY = Math.min(40, Math.floor(fromY));
+        for (let y = startY; y >= BEDROCK_Y; y--) {
+          if (isSolidAt(px, y, pz) && !isSolidAt(px, y + 1, pz)) return y + 0.5;  // 上が空いた床のみ
+        }
+        return null;
+      }
       for (let y = 20; y >= BEDROCK_Y; y--) {
         if (isSolidAt(px, y, pz)) return y + 0.5;
       }
@@ -3847,7 +3973,7 @@
       return false;
     }
 
-    function spawnWarden(x, z) {
+    function spawnWarden(x, z, forceY) {
       if (!wardenModelTemplate) return;
       const group = wardenModelTemplate.clone(true);
       // 個別フラッシュのため各メッシュのマテリアルをこの個体専用にクローン
@@ -3870,7 +3996,7 @@
       group.add(collider);
       group.userData.collider = collider;
       wardenColliders.push(collider);
-      const y = creeperGroundY(x, z);
+      const y = (forceY !== undefined) ? forceY : creeperGroundY(x, z);
       group.position.set(x, y !== null ? y : 5, z);
       group.userData.hp = WARDEN_HP;
       group.userData.maxHp = WARDEN_HP;
@@ -3899,6 +4025,7 @@
       if (idx !== -1) wardens.splice(idx, 1);
       const ci = wardenColliders.indexOf(group.userData.collider);
       if (ci !== -1) wardenColliders.splice(ci, 1);
+      if (group.userData.isBoss) onDungeonBossDefeated();  // ボス撃破 → 扉を開ける
     }
 
     function _wardenDist(group) {
@@ -3934,9 +4061,8 @@
     }
 
     function spawnInitialWardens() {
+      // ウォーデンはダンジョンの奥のボス専用。地表には湧かせない (manageDungeonBoss が出現させる)
       wardensReady = true;
-      let guard = 0;
-      while (wardens.length < WARDEN_TARGET && guard++ < 40) trySpawnWardenNearPlayer();
     }
 
     function manageWardens(dt) {
@@ -3949,11 +4075,7 @@
         const dz = camera.position.z - w.position.z;
         if (dx * dx + dz * dz > D2) killWarden(w);
       }
-      wardenSpawnTimer += dt;
-      if (wardenSpawnTimer >= WARDEN_SPAWN_INTERVAL) {
-        wardenSpawnTimer = 0;
-        if (wardens.length < WARDEN_TARGET) trySpawnWardenNearPlayer();
-      }
+      // 地表への自動湧きはしない (ボスは manageDungeonBoss がダンジョン奥に出現させる)
     }
 
     // ソニックブームの視覚エフェクト (ウォーデン→プレイヤーへ伸びて広がる衝撃波)
@@ -4094,7 +4216,7 @@
             const mnx = mdx / mhoriz, mnz = mdz / mhoriz;
             const newX = w.position.x + mnx * WARDEN_SPEED * dt;
             const newZ = w.position.z + mnz * WARDEN_SPEED * dt;
-            const newY = creeperGroundY(newX, newZ);
+            const newY = creeperGroundY(newX, newZ, ud.groundY + WARDEN_STEP_HEIGHT);
             if (newY !== null && newY - ud.groundY <= WARDEN_STEP_HEIGHT && waterDepthAt(newX, newZ) < MOB_DEEP_WATER) {
               w.position.x = newX; w.position.z = newZ; setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
             }
@@ -4150,7 +4272,7 @@
         const nx = dx / horiz, nz = dz / horiz;
         const newX = w.position.x + nx * WARDEN_SPEED * dt;
         const newZ = w.position.z + nz * WARDEN_SPEED * dt;
-        const newY = creeperGroundY(newX, newZ);
+        const newY = creeperGroundY(newX, newZ, ud.groundY + WARDEN_STEP_HEIGHT);
         if (newY === null) continue;
         if (newY - ud.groundY > WARDEN_STEP_HEIGHT) continue;  // 論理接地高さで段差判定
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;  // 深い水は避ける (溺れ防止)
@@ -4680,7 +4802,7 @@
       });
     }
 
-    function spawnSlimeKnight(x, z) {
+    function spawnSlimeKnight(x, z, forceY) {
       if (!slimeKnightModelTemplate) return;
       const group = cloneMobInstance(slimeKnightModelTemplate, 'slimeKnightGroup');
       const collider = new THREE.Mesh(new THREE.BoxGeometry(SK_WIDTH, SK_HEIGHT, SK_WIDTH), _slimeKnightColliderMat);
@@ -4690,7 +4812,7 @@
       group.add(collider);
       group.userData.collider = collider;
       slimeKnightColliders.push(collider);
-      const y = creeperGroundY(x, z);
+      const y = (forceY !== undefined) ? forceY : creeperGroundY(x, z);
       group.position.set(x, y !== null ? y : 5, z);
       group.userData.hp = SK_HP;
       group.userData.maxHp = SK_HP;
@@ -4748,12 +4870,84 @@
         const dz = camera.position.z - sk.position.z;
         if (dx * dx + dz * dz > D2) killSlimeKnight(sk);
       }
-      // 昼夜問わず徘徊する敵 (DQモンスター。松明の灯りでは湧き潰せる)
-      slimeKnightSpawnTimer += dt;
-      if (slimeKnightSpawnTimer >= SK_SPAWN_INTERVAL) {
-        slimeKnightSpawnTimer = 0;
-        if (slimeKnights.length < SK_TARGET) trySpawnSlimeKnightNearPlayer();
+      // 地表には湧かせない (洞窟専用。manageCaveMobs が洞窟内に湧かせる)。遠方の個体だけ上で消す
+    }
+
+    // ===== 洞窟Mobの湧き + ダンジョンのボス(ウォーデン) =====
+    let caveSpawnTimer = 0;
+    let dungeonBoss = null;
+    let _caveSlimeDef = null, _caveBubbleDef = null;
+    const CAVE_SPAWN_INTERVAL = 2.5;   // 補充判定の間隔(秒)
+    const CAVE_SLIME_TARGET = 9;       // 洞窟内のスライム上限
+    const CAVE_BUBBLE_TARGET = 6;      // 〃 バブルスライム
+    const CAVE_KNIGHT_TARGET = 3;      // 〃 スライムナイト
+
+    function trySpawnCaveMob(def, forceY) {
+      if (!def || !def.template) return false;
+      for (let i = 0; i < 12; i++) {
+        const x = Math.round(camera.position.x + (Math.random() * 2 - 1) * 18);
+        const z = Math.round(camera.position.z + (Math.random() * 2 - 1) * 18);
+        if (isCaveSpawnCell(x, z)) { spawnPassiveMob(def, x, z, forceY); return true; }
       }
+      return false;
+    }
+    function trySpawnCaveKnight(forceY) {
+      if (!slimeKnightsReady) return false;
+      for (let i = 0; i < 12; i++) {
+        const x = Math.round(camera.position.x + (Math.random() * 2 - 1) * 20);
+        const z = Math.round(camera.position.z + (Math.random() * 2 - 1) * 20);
+        if (isCaveSpawnCell(x, z)) { spawnSlimeKnight(x, z, forceY); return true; }
+      }
+      return false;
+    }
+
+    // 洞窟内 (= ダンジョン範囲かつ地下) にいるときだけ スライム系を湧かせる
+    function manageCaveMobs(dt) {
+      // 洞窟Mobが階段から地表へ脱出したら消す (「洞窟にのみ生息」を保証)
+      for (let i = passiveMobs.length - 1; i >= 0; i--) {
+        const m = passiveMobs[i];
+        if (m.userData.def && m.userData.def.cave && (m.position.y > 4 || !inDungeon(m.position.x, m.position.z))) killPassiveMob(m);
+      }
+      for (let i = slimeKnights.length - 1; i >= 0; i--) {
+        const sk = slimeKnights[i];
+        if (sk.position.y > 4 || !inDungeon(sk.position.x, sk.position.z)) killSlimeKnight(sk);
+      }
+      const p = camera.position;
+      if (!inDungeon(p.x, p.z) || p.y > 5) return;
+      caveSpawnTimer += dt;
+      if (caveSpawnTimer < CAVE_SPAWN_INTERVAL) return;
+      caveSpawnTimer = 0;
+      if (!_caveSlimeDef) { _caveSlimeDef = PMOB_DEFS.find(d => d.key === 'slime'); _caveBubbleDef = PMOB_DEFS.find(d => d.key === 'bubbleslime'); }
+      if (_caveSlimeDef && countPassiveMobs(_caveSlimeDef) < CAVE_SLIME_TARGET) trySpawnCaveMob(_caveSlimeDef, DUNGEON_STAND_Y);
+      if (_caveBubbleDef && countPassiveMobs(_caveBubbleDef) < CAVE_BUBBLE_TARGET) trySpawnCaveMob(_caveBubbleDef, DUNGEON_STAND_Y);
+      if (slimeKnights.length < CAVE_KNIGHT_TARGET) trySpawnCaveKnight(DUNGEON_STAND_Y);
+    }
+
+    // ボス(ウォーデン): プレイヤーがボス部屋付近に来たら出現。未討伐の間だけ
+    function manageDungeonBoss(dt) {
+      if (!wardensReady) return;
+      if (dungeonBoss && wardens.indexOf(dungeonBoss) === -1) dungeonBoss = null;  // 死亡/消滅
+      if (dungeonBossDefeated) return;
+      const p = camera.position;
+      const nearChamber = inDungeon(p.x, p.z) && p.y < 5 && p.z > 160;
+      if (nearChamber && !dungeonBoss) {
+        spawnWarden(DBOSS.x, DBOSS.z, DUNGEON_STAND_Y);
+        dungeonBoss = wardens[wardens.length - 1] || null;
+        if (dungeonBoss) { dungeonBoss.userData.isBoss = true; showToast('⚔ ボス「ウォーデン」が立ちはだかる！'); }
+      }
+    }
+
+    // ボス撃破: 進行を保存し、ボス前の扉(黒曜石)を開ける
+    function onDungeonBossDefeated() {
+      if (dungeonBossDefeated) return;
+      dungeonBossDefeated = true;
+      dungeonBoss = null;
+      saveDungeonState();
+      for (const gk of dungeonGateCells) {
+        const [gx, gy, gz] = gk.split(',').map(Number);
+        removeBlock(gx, gy, gz);
+      }
+      showToast('🚪 ボスを倒した！ 奥の扉が開いた…宝物が待っている');
     }
 
     function updateSlimeKnights(dt) {
@@ -4810,7 +5004,7 @@
         const nx = dx / (dist || 1), nz = dz / (dist || 1);
         const newX = sk.position.x + nx * SK_SPEED * dt;
         const newZ = sk.position.z + nz * SK_SPEED * dt;
-        const newY = creeperGroundY(newX, newZ);
+        const newY = creeperGroundY(newX, newZ, ud.groundY + SK_STEP_HEIGHT);
         if (newY === null) continue;
         if (newY - ud.groundY > SK_STEP_HEIGHT) continue;
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
@@ -5289,9 +5483,7 @@
     });
     loadMobGLB('3D/スライムナイト.glb', SK_HEIGHT, SK_FACING_OFFSET, (wrapper) => {
       slimeKnightModelTemplate = wrapper; slimeKnightsReady = true;
-      // 昼夜問わず徘徊するので最初から周囲に湧かせる
-      let guard = 0;
-      while (slimeKnights.length < SK_TARGET && guard++ < 40) { if (!trySpawnSlimeKnightNearPlayer()) break; }
+      // 地表には湧かせない (洞窟専用。manageCaveMobs が洞窟内に湧かせる)
     });
 
     // ===== 爆発パーティクル =====
@@ -5647,9 +5839,9 @@
       // ウサギ: 本家準拠で常にぴょんぴょん跳ねる。プレイヤーが近づくと逃げる (臆病)
       { key: 'rabbit',   file: '3D/Meshy_AI_Voxel_Bunny_0531110514_texture.glb',           height: 0.5, target: 5, speed: 1.5, hp: 3,  facing: 0, template: null, dimX: 0.4,  dimZ: 0.4,  radius: 0.2,  hop: true },
       // スライム: ドラクエ風にぴょんぴょん跳ね、プレイヤーが近づくと逃げる (臆病)
-      { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true },
+      { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true, cave: true },
       // バブルスライム: ドラクエの毒スライム。スライム同様ぴょんぴょん跳ねる。スライムボールをドロップ
-      { key: 'bubbleslime', file: '3D/バブルスライム.glb', height: 0.5, target: 8, speed: 1.4, hp: 8, facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, hop: true },
+      { key: 'bubbleslime', file: '3D/バブルスライム.glb', height: 0.5, target: 8, speed: 1.4, hp: 8, facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, hop: true, cave: true },
       // トト: ボストンテリアの犬。友好的に歩き回る (ペット枠)。walk=歩行時に小走りアニメ
       { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 4, speed: 1.5, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28, walk: true },
     ];
@@ -5685,7 +5877,7 @@
       return n;
     }
 
-    function spawnPassiveMob(def, x, z) {
+    function spawnPassiveMob(def, x, z, forceY) {
       if (!def.template) return;
       const group = def.template.clone(true);
       // ホップ用: モデル本体(children[0])を上下させる。コライダ追加前に掴んでおく
@@ -5711,7 +5903,7 @@
       group.add(collider);
       group.userData.collider = collider;
       passiveColliders.push(collider);
-      const y = creeperGroundY(x, z);
+      const y = (forceY !== undefined) ? forceY : creeperGroundY(x, z);
       group.position.set(x, y !== null ? y : 5, z);
       group.userData.def = def;
       group.userData.radius = def.radius || 0.35;
@@ -6002,6 +6194,7 @@
         pmobSpawnTimer = 0;
         for (const def of PMOB_DEFS) {
           if (!def.template) continue;
+          if (def.cave) continue;  // 洞窟専用Mob (スライム系) は地表に湧かせない。manageCaveMobs が担当
           if (countPassiveMobs(def) < def.target) trySpawnPassiveMobNearPlayer(def);
         }
       }
@@ -6250,9 +6443,9 @@
         const dirZ = Math.cos(ud.heading);
         const newX = m.position.x + dirX * speed * dt;
         const newZ = m.position.z + dirZ * speed * dt;
-        const newY = creeperGroundY(newX, newZ);
         // ホップMobはイージング中の実Yではなく論理接地高さ(groundY)で段差を判定する
         const groundRef = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
+        const newY = creeperGroundY(newX, newZ, groundRef + PMOB_STEP_HEIGHT);
         if (newY === null || newY - groundRef > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
           // 壁/崖/深い水(溺れ防止): 向きを変える
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
@@ -6288,10 +6481,12 @@
           if (def.key === 'villager') {
             for (const s of villagerSpawns) spawnPassiveMob(def, s.x, s.z);
           }
-          // 初期スポーン (目標数まで周囲に補充)
-          let guard = 0;
-          while (countPassiveMobs(def) < def.target && guard++ < 30) {
-            if (!trySpawnPassiveMobNearPlayer(def)) break;
+          // 初期スポーン (目標数まで周囲に補充)。洞窟専用Mob(スライム系)は地表に湧かせない
+          if (!def.cave) {
+            let guard = 0;
+            while (countPassiveMobs(def) < def.target && guard++ < 30) {
+              if (!trySpawnPassiveMobNearPlayer(def)) break;
+            }
           }
         },
         undefined,
@@ -7013,6 +7208,10 @@
         // スライムナイト (敵Mob・DQ風): ぴょんぴょん跳ねて追跡し剣で斬る。たまにホイミで自己回復
         updateSlimeKnights(dt);
         manageSlimeKnights(dt);
+
+        // 探索ダンジョン: 洞窟内にスライム系を湧かせ、奥でボス(ウォーデン)を出現させる
+        manageCaveMobs(dt);
+        manageDungeonBoss(dt);
 
         // 矢 (プレイヤーの弓 + スケルトン) と XPオーブ
         updateArrows(dt);
