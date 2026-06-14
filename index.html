@@ -5139,16 +5139,17 @@
       return best;
     }
 
-    // 敵Mob (ゾンビ/スケルトン/スライムナイト/クリーパー) に大ダメージ。倒したらドロップなしで除去
-    function golemDamageHostile(e) {
-      if (zombies.includes(e)) { hitZombie(e, GOLEM_MELEE_DAMAGE); return; }
-      if (skeletons.includes(e)) { hitSkeleton(e, GOLEM_MELEE_DAMAGE); return; }
-      if (slimeKnights.includes(e)) { hitSlimeKnight(e, GOLEM_MELEE_DAMAGE); return; }
+    // 敵Mob (ゾンビ/スケルトン/スライムナイト/クリーパー) に指定ダメージ。倒したらドロップなしで除去
+    function damageHostileMob(e, dmg) {
+      if (zombies.includes(e)) { hitZombie(e, dmg); return; }
+      if (skeletons.includes(e)) { hitSkeleton(e, dmg); return; }
+      if (slimeKnights.includes(e)) { hitSlimeKnight(e, dmg); return; }
       if (creepers.includes(e)) {
-        e.userData.hp -= GOLEM_MELEE_DAMAGE; e.userData.hitFlash = 0.6;
-        if (e.userData.hp <= 0) killCreeper(e, false);
+        e.userData.hp = (e.userData.hp ?? 6) - dmg; e.userData.hitFlash = 0.6;
+        if (e.userData.hp <= 0) killCreeper(e, false);   // ドロップなしで除去 (爆発も防ぐ)
       }
     }
+    function golemDamageHostile(e) { damageHostileMob(e, GOLEM_MELEE_DAMAGE); }
 
     function trySpawnGolemNearPlayer() {
       for (let attempt = 0; attempt < 8; attempt++) {
@@ -5616,7 +5617,7 @@
       // ウマ: 本家準拠でおとなしく徘徊 (騎乗はなし)。革をドロップ
       { key: 'horse',    file: '3D/Meshy_AI_Pinto_Minecraft_Horse_0531110521_texture.glb', height: 1.6, target: 3, speed: 1.4, hp: 22, facing: 0, template: null, dimX: 1.2,  dimZ: 1.2,  radius: 0.6 },
       // スティーブ / ヴァーダントマイナー: 友好的な人型NPC。村人のように徘徊し、殴ると逃げる
-      { key: 'steve',    file: '3D/Meshy_AI_Steve_with_a_Pickaxe_0531110417_texture.glb',  height: 1.9, target: 2, speed: 1.1, hp: 20, facing: 0, template: null, dimX: 0.6,  dimZ: 0.6,  radius: 0.3 },
+      { key: 'steve',    file: '3D/Meshy_AI_Steve_with_a_Pickaxe_0531110417_texture.glb',  height: 1.9, target: 2, speed: 1.1, hp: 20, facing: 0, template: null, dimX: 0.6,  dimZ: 0.6,  radius: 0.3, fighter: true },
       { key: 'miner',    file: '3D/Meshy_AI_Verdant_Miner_0531110423_texture.glb',         height: 1.9, target: 2, speed: 1.1, hp: 20, facing: 0, template: null, dimX: 0.6,  dimZ: 0.6,  radius: 0.3 },
       // ウサギ: 本家準拠で常にぴょんぴょん跳ねる。プレイヤーが近づくと逃げる (臆病)
       { key: 'rabbit',   file: '3D/Meshy_AI_Voxel_Bunny_0531110514_texture.glb',           height: 0.5, target: 5, speed: 1.5, hp: 3,  facing: 0, template: null, dimX: 0.4,  dimZ: 0.4,  radius: 0.2,  hop: true },
@@ -5641,6 +5642,11 @@
     const PMOB_WARDEN_ATTACK_REACH = 0.7;    // ウォーデンに与ダメージできる追加リーチ (mob半径+ウォーデン半径 に加算)
     const PMOB_WARDEN_ATTACK_DAMAGE = 3;     // モブ1発の対ウォーデン与ダメージ
     const PMOB_WARDEN_ATTACK_COOLDOWN = 1.2; // モブの攻撃間隔(秒)
+    // 戦士Mob (Steve等。fighter=true) が近くの敵Mobを攻撃する設定
+    const FIGHTER_RANGE = 16;          // この距離以内の敵Mobを見つけたら追って攻撃
+    const FIGHTER_ATTACK_DAMAGE = 5;   // 1発の与ダメージ
+    const FIGHTER_ATTACK_COOLDOWN = 0.9;
+    const FIGHTER_REACH = 1.3;         // mob半径に加える攻撃リーチ
     const SLIME_HOP_SPEED = 6;        // ぴょんぴょん跳ねる周期の速さ
     const SLIME_HOP_HEIGHT = 0.34;    // 普段のホップの高さ
     const SLIME_STEP_HOP = 0.24;      // 段差を上り下りした瞬間に追加で跳ねる高さ
@@ -5801,6 +5807,7 @@
     let playerLevel = 0;
     const enchants = { sword: false, armor: false };   // 強化済みフラグ
     const ENCHANT_COST_LEVELS = 5;
+    const HP_PER_LEVEL = 4;            // レベルアップで増える最大HP (DQ風)
     function xpNeeded() { return 10 + playerLevel * 2; }
     const xpFillEl2 = document.getElementById('xpfill');
     const xpLevelEl = document.getElementById('xplevel');
@@ -5810,11 +5817,16 @@
     }
     function addXP(n) {
       playerXP += n;
+      let leveled = false;
       while (playerXP >= xpNeeded()) {
         playerXP -= xpNeeded();
         playerLevel++;
-        showToast(`レベルアップ！ Lv ${playerLevel}`);
+        playerMaxHP += HP_PER_LEVEL;        // 最大HPアップ (DQ風)
+        playerHP = playerMaxHP;             // レベルアップで全回復
+        leveled = true;
+        showToast(`レベルアップ！ Lv ${playerLevel}  (最大HP ${playerMaxHP})`);
       }
+      if (leveled && typeof updateHPDisplay === 'function') updateHPDisplay();
       updateXPDisplay();
     }
 
@@ -6061,8 +6073,47 @@
           }
         }
 
-        // --- ウォーデン敵対: 近くにウォーデンを見つけたら群れで攻撃しに行く ---
         ud.attackCd = Math.max(0, (ud.attackCd || 0) - dt);
+
+        // --- 戦士Mob (Steve等): 近くの敵Mob(ゾンビ/スケルトン/クリーパー/スライムナイト)を追って攻撃 ---
+        if (def.fighter) {
+          const foe = nearestHostileTo(m, FIGHTER_RANGE);
+          if (foe) {
+            const fdx = foe.position.x - m.position.x;
+            const fdz = foe.position.z - m.position.z;
+            const fdist = Math.sqrt(fdx * fdx + fdz * fdz) || 0.0001;
+            ud.heading = Math.atan2(fdx, fdz);
+            ud.state = 'aggro';
+            const reach = (def.radius || 0.35) + FIGHTER_REACH;
+            if (fdist <= reach) {
+              m.rotation.y = ud.heading + def.facing;
+              if (ud.attackCd <= 0) {
+                ud.attackCd = FIGHTER_ATTACK_COOLDOWN;
+                damageHostileMob(foe, FIGHTER_ATTACK_DAMAGE);
+                m.scale.setScalar(1.06);   // 振りかぶる演出
+                setTimeout(() => { if (m.parent) m.scale.setScalar(1); }, 100);
+              }
+              continue;
+            }
+            // 接近 (崖・深い水は避ける)
+            const aspeed = def.speed * PMOB_AGGRO_SPEED_MULT;
+            const adirX = Math.sin(ud.heading), adirZ = Math.cos(ud.heading);
+            const anx = m.position.x + adirX * aspeed * dt;
+            const anz = m.position.z + adirZ * aspeed * dt;
+            const any = creeperGroundY(anx, anz);
+            const aref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
+            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER) {
+              ud.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI * 0.4;
+              continue;
+            }
+            m.position.x = anx; m.position.z = anz;
+            setMobGroundTarget(ud, any, MOB_STEP_HOP_DUR);
+            m.rotation.y = Math.atan2(adirX, adirZ) + def.facing;
+            continue;
+          }
+        }
+
+        // --- ウォーデン敵対: 近くにウォーデンを見つけたら群れで攻撃しに行く ---
         if (wardens.length) {
           const foe = nearestWardenTo(m, PMOB_AGGRO_RANGE);
           if (foe) {
@@ -6482,8 +6533,8 @@
     }
 
     // ===== プレイヤー HP =====
-    const PLAYER_MAX_HP = 20;
-    let playerHP = PLAYER_MAX_HP;
+    let playerMaxHP = 20;            // 最大HP (レベルアップで増える)
+    let playerHP = playerMaxHP;
     let lastDamageTime = -Infinity;
     const INVULN_DURATION = 0.5;     // 連続ダメージ防止
     const HP_REGEN_DELAY = 5.0;      // 被弾後この秒数経過で回復開始
@@ -6509,8 +6560,8 @@
     const gameoverEl = document.getElementById('gameover');
 
     function updateHPDisplay() {
-      hpFillEl.style.width = `${(playerHP / PLAYER_MAX_HP) * 100}%`;
-      hpTextEl.textContent = `HP ${playerHP} / ${PLAYER_MAX_HP}`;
+      hpFillEl.style.width = `${(playerHP / playerMaxHP) * 100}%`;
+      hpTextEl.textContent = `HP ${playerHP} / ${playerMaxHP}`;
     }
     updateHPDisplay();
 
@@ -6557,10 +6608,10 @@
       breathFillEl.style.width = `${remain * 100}%`;
     }
 
-    // 食料を食べたときの HP 回復 (上限 PLAYER_MAX_HP)
+    // 食料を食べたときの HP 回復 (上限 playerMaxHP)
     function healPlayer(amount) {
-      if (playerHP <= 0 || playerHP >= PLAYER_MAX_HP) return false;
-      playerHP = Math.min(PLAYER_MAX_HP, playerHP + amount);
+      if (playerHP <= 0 || playerHP >= playerMaxHP) return false;
+      playerHP = Math.min(playerMaxHP, playerHP + amount);
       updateHPDisplay();
       return true;
     }
@@ -6853,7 +6904,7 @@
 
         // 奈落落下: y < VOID_Y で即死
         if (camera.position.y < VOID_Y && playerHP > 0) {
-          damagePlayer(PLAYER_MAX_HP, true, true);
+          damagePlayer(playerMaxHP, true, true);
         }
 
         // 溶岩ダメージ: 溶岩に触れている間、一定間隔で継続ダメージ
@@ -6958,12 +7009,12 @@
         updatePrimedTNT(dt);
 
         // HP の自然回復 (本家準拠: 満腹度 18 以上のときだけ。回復すると満腹度を消耗)
-        if (playerHP > 0 && playerHP < PLAYER_MAX_HP && playerHunger >= HUNGER_REGEN_THRESHOLD) {
+        if (playerHP > 0 && playerHP < playerMaxHP && playerHunger >= HUNGER_REGEN_THRESHOLD) {
           timeSinceDamage += dt;
           if (timeSinceDamage >= HP_REGEN_DELAY) {
             regenTimer += dt;
             if (regenTimer >= HP_REGEN_INTERVAL) {
-              playerHP = Math.min(PLAYER_MAX_HP, playerHP + 1);
+              playerHP = Math.min(playerMaxHP, playerHP + 1);
               regenTimer = 0;
               updateHPDisplay();
               addExhaustion(EXHAUST_REGEN);
