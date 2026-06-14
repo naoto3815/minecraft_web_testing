@@ -2008,18 +2008,18 @@
       buildVillageHouse(100, 101, 6, 6, 7, 4, 'N');
       buildVillageWell(90, 90);
 
-      // 畑 (南西): 耕地 + 中央の水路 + 小麦
+      // 畑 (南西): 平らな耕地 + 中央に1マスの水源 + 小麦 (凸凹を作らない)
       for (let x = 78; x <= 88; x++) for (let z = 101; z <= 111; z++) {
-        if (z === 106) vSet(x, FY, z, WATER_INDEX);
+        if (x === 83 && z === 106) vSet(x, FY, z, WATER_INDEX);   // 灌漑用の水源1マス
         else { vSet(x, FY, z, FARMLAND_INDEX); villageCrops.push({ x, z }); }
       }
 
-      // 外周の柵 (木、1段)。道の出入口は隙間(門)として空ける
+      // 外周の柵 (木、2段)。道の出入口は隙間(門)として空ける
       for (let x = VX0; x <= VX1; x++) {
-        if (x < 95 || x > 97) { vSet(x, FY + 1, VZ0, 4); vSet(x, FY + 1, VZ1, 4); }
+        if (x < 95 || x > 97) for (let y = FY + 1; y <= FY + 2; y++) { vSet(x, y, VZ0, 4); vSet(x, y, VZ1, 4); }
       }
       for (let z = VZ0; z <= VZ1; z++) {
-        if (z < 95 || z > 97) { vSet(VX0, FY + 1, z, 4); vSet(VX1, FY + 1, z, 4); }
+        if (z < 95 || z > 97) for (let y = FY + 1; y <= FY + 2; y++) { vSet(VX0, y, z, 4); vSet(VX1, y, z, 4); }
       }
 
       // 街灯 (プラザ4隅): 木の柱 + 先端に松明
@@ -2174,8 +2174,10 @@
           if (addBlock(cx, y, cz, fluid)) keys.push(key(cx, y, cz));
         }
       }
-      // 木 (土の上のみ・水没地と スポーン付近は避ける・決定論的に判定)
-      if (surface === 1 && h >= WATER_LEVEL &&
+      // 木 (土の上のみ・水没地と スポーン付近は避ける・決定論的に判定)。
+      // 村の周囲(+2マスの余白)には生やさない: 木の葉が村の縁へはみ出して浮きブロックになるのを防ぐ
+      const nearVillage = Math.abs(cx - VILLAGE_CX) <= VILLAGE_HALF + 2 && Math.abs(cz - VILLAGE_CZ) <= VILLAGE_HALF + 2;
+      if (surface === 1 && h >= WATER_LEVEL && !nearVillage &&
           !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4) &&
           hashRand(cx, cz, 0) < TREE_CHANCE) {
         plantTree(cx, h, cz, keys);
