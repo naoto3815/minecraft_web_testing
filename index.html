@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14m ・ 山の上で縦揺れする不具合を修正</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14n ・ ブロック破壊時にヒビ割れ演出を追加</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -1630,6 +1630,87 @@
       instancedMeshes.push(im);
       instancePositions.push([]);
     });
+
+    // ===== ブロック破壊のヒビ割れ演出 (本家 destroy_stage_0〜9 相当) =====
+    // 破壊進行度に応じて、対象ブロックへ10段階のヒビ模様テクスチャを重ねて表示する。
+    // テクスチャはロード時に16×16で手続き生成 (中心から放射状にヒビが進行・累積)。
+    const BREAK_STAGES = 10;
+    const breakTextures = (() => {
+      const N = 16, cx = 7.5, cy = 7.5;
+      const crack = new Set();                       // 累積するヒビのピクセル "x,y"
+      const addPix = (x, y) => {
+        x = Math.max(0, Math.min(N - 1, x | 0));
+        y = Math.max(0, Math.min(N - 1, y | 0));
+        crack.add(x + ',' + y);
+      };
+      // 中心から放射状に伸びる6本のヒビの先端
+      const seedDirs = [[-1, -0.6], [1, -0.4], [-0.7, 1], [0.85, 0.9], [0.2, -1], [-1, 0.25]];
+      const tips = seedDirs.map(d => {
+        const len = Math.hypot(d[0], d[1]);
+        return { x: cx, y: cy, dx: d[0] / len, dy: d[1] / len };
+      });
+      addPix(cx, cy);
+      // 決定論的な擬似乱数 (段階を再ビルドしても同じ割れ方になるよう固定シード)
+      let rngState = 0x4d2;
+      const rnd = () => { rngState = (rngState * 1103515245 + 12345) & 0x7fffffff; return rngState / 0x7fffffff; };
+      const texes = [];
+      for (let s = 0; s < BREAK_STAGES; s++) {
+        const steps = s === 0 ? 2 : 4;               // 段階が進むほどヒビを伸ばす
+        for (const t of tips) {
+          for (let k = 0; k < steps; k++) {
+            const ang = Math.atan2(t.dy, t.dx) + (rnd() - 0.5) * 0.9;  // 少しジグザグに
+            t.dx = Math.cos(ang); t.dy = Math.sin(ang);
+            t.x += t.dx; t.y += t.dy;
+            addPix(t.x, t.y);
+            if (rnd() < 0.35) addPix(t.x + (rnd() < 0.5 ? 1 : 0), t.y + (rnd() < 0.5 ? 1 : 0));  // たまに太く
+          }
+        }
+        // この段階のキャンバスを描画
+        const cv = document.createElement('canvas');
+        cv.width = cv.height = N;
+        const ctx = cv.getContext('2d');
+        const a = 0.5 + s * 0.045;                   // 進むほど濃く
+        crack.forEach(p => {
+          const [px, py] = p.split(',').map(Number);
+          ctx.fillStyle = `rgba(8,8,10,${a})`;
+          ctx.fillRect(px, py, 1, 1);
+          // ヒビの縁に薄いハイライト (立体感)
+          if ((px + py) % 3 === 0) { ctx.fillStyle = `rgba(255,255,255,${0.10 + s * 0.01})`; ctx.fillRect(px, py, 1, 1); }
+        });
+        const tex = new THREE.CanvasTexture(cv);
+        tex.magFilter = THREE.NearestFilter;
+        tex.minFilter = THREE.NearestFilter;
+        tex.generateMipmaps = false;
+        texes.push(tex);
+      }
+      return texes;
+    })();
+
+    const breakOverlayMat = new THREE.MeshBasicMaterial({
+      map: breakTextures[0], transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    const breakOverlay = new THREE.Mesh(new THREE.BoxGeometry(1.004, 1.004, 1.004), breakOverlayMat);
+    breakOverlay.frustumCulled = false;
+    breakOverlay.renderOrder = 999;
+    breakOverlay.visible = false;
+    breakOverlay.userData.stage = -1;
+    scene.add(breakOverlay);
+
+    function updateBreakOverlay(bx, by, bz, ratio) {
+      const stage = Math.max(0, Math.min(BREAK_STAGES - 1, Math.floor(ratio * BREAK_STAGES)));
+      if (stage !== breakOverlay.userData.stage) {
+        breakOverlay.userData.stage = stage;
+        breakOverlayMat.map = breakTextures[stage];
+        breakOverlayMat.needsUpdate = true;
+      }
+      breakOverlay.position.set(bx, by, bz);
+      breakOverlay.visible = true;
+    }
+    function hideBreakOverlay() {
+      breakOverlay.visible = false;
+      breakOverlay.userData.stage = -1;
+    }
 
     // ===== 水: 隣接面をカリングした単一メッシュで「つながった」見た目にする =====
     // 水ブロックの InstancedMesh はデータ/レイキャスト/破壊設置用に残したまま非表示化し、
@@ -3372,6 +3453,7 @@
       breakTargetType = null;
       breakProgress = 0;
       breakBarEl.style.display = 'none';
+      hideBreakOverlay();
     });
 
     addEventListener('contextmenu', (e) => e.preventDefault());
@@ -7451,6 +7533,7 @@
             breakProgress += dt * speedMult;
             breakBarEl.style.display = 'block';
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
+            updateBreakOverlay(info.x, info.y, info.z, breakProgress / hardness);  // ヒビ割れ演出を更新
             if (breakProgress >= hardness) {
               const wasFluid = (info.typeIndex === WATER_INDEX || info.typeIndex === LAVA_INDEX);
               addExhaustion(EXHAUST_MINE);  // 採掘で満腹度を消耗 (本家準拠)
@@ -7494,12 +7577,14 @@
               breakTargetType = null;
               breakProgress = 0;
               breakBarEl.style.display = 'none';
+              hideBreakOverlay();
             }
           } else {
             breakTargetKey = null;
             breakTargetType = null;
             breakProgress = 0;
             breakBarEl.style.display = 'none';
+            hideBreakOverlay();
           }
         }
 
