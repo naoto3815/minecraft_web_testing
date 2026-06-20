@@ -323,7 +323,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14o ・ スマホ操作を刷新 (PCと同等の操作に対応)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14p ・ 水のヒビ除去 / 攻撃ヒット演出 / トトがペット化(追従・吠える)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -4046,6 +4046,102 @@
       });
     }
 
+    // ===== 攻撃ヒット演出 — ダメージが当たったときに弾ける火花パーティクル =====
+    const hitBursts = [];
+    function spawnHitBurst(group) {
+      // Mob の中心位置を求める (足元y=0基準なので bounding box 中央を使う)
+      const box = new THREE.Box3().setFromObject(group);
+      const c = box.getCenter(new THREE.Vector3());
+      const n = 8;
+      for (let i = 0; i < n; i++) {
+        const mat = new THREE.SpriteMaterial({ color: (i % 2) ? 0xff3b30 : 0xffd23a, transparent: true, depthTest: true, depthWrite: false });
+        const sp = new THREE.Sprite(mat);
+        const s = 0.13 + Math.random() * 0.09;
+        sp.scale.set(s, s, 1);
+        sp.position.copy(c);
+        sp.renderOrder = 998;
+        const ang = (i / n) * Math.PI * 2 + Math.random() * 0.6;
+        const sp0 = 2.2 + Math.random() * 1.8;
+        sp.userData = { vx: Math.cos(ang) * sp0, vy: 1.4 + Math.random() * 2.2, vz: Math.sin(ang) * sp0, life: 0.34 };
+        scene.add(sp);
+        hitBursts.push(sp);
+      }
+    }
+    function updateHitBursts(dt) {
+      for (let i = hitBursts.length - 1; i >= 0; i--) {
+        const p = hitBursts[i], u = p.userData;
+        u.life -= dt;
+        p.position.x += u.vx * dt;
+        p.position.y += u.vy * dt;
+        p.position.z += u.vz * dt;
+        u.vy -= 9 * dt;                       // 重力でパッと散って落ちる
+        p.material.opacity = Math.max(0, u.life / 0.34);
+        if (u.life <= 0) { scene.remove(p); p.material.dispose(); hitBursts.splice(i, 1); }
+      }
+    }
+
+    // ===== トト(ペット犬)の鳴き声演出 — 「ワン！」吹き出し + 鳴き声 =====
+    const barkTexts = [];
+    const _barkTex = (() => {
+      const cv = document.createElement('canvas'); cv.width = 160; cv.height = 72;
+      const ctx = cv.getContext('2d');
+      ctx.font = 'bold 46px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 7; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.strokeText('ワン！', 80, 38);
+      ctx.fillStyle = '#ffffff'; ctx.fillText('ワン！', 80, 38);
+      const t = new THREE.CanvasTexture(cv); t.minFilter = THREE.LinearFilter; return t;
+    })();
+    function spawnBarkText(x, y, z) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: _barkTex, transparent: true, depthTest: false, depthWrite: false }));
+      sp.scale.set(1.0, 0.45, 1);
+      sp.position.set(x, y, z);
+      sp.renderOrder = 1000;
+      sp.userData = { vy: 0.9, life: 1.0 };
+      scene.add(sp); barkTexts.push(sp);
+    }
+    function updateBarkTexts(dt) {
+      for (let i = barkTexts.length - 1; i >= 0; i--) {
+        const s = barkTexts[i], u = s.userData;
+        u.life -= dt; s.position.y += u.vy * dt;
+        s.material.opacity = Math.min(1, u.life * 1.6);
+        if (u.life <= 0) { scene.remove(s); s.material.dispose(); barkTexts.splice(i, 1); }
+      }
+    }
+    function playBarkSound() {
+      const ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+      const now = ctx.currentTime;
+      for (let k = 0; k < 2; k++) {   // 「ワンワン」: 短い下降パルス2連
+        const t0 = now + k * 0.13;
+        const osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(520, t0);
+        osc.frequency.exponentialRampToValueAtTime(170, t0 + 0.1);
+        g.gain.setValueAtTime(0.0001, t0);
+        g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.01);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.11);
+        osc.connect(g).connect(ctx.destination);
+        osc.start(t0); osc.stop(t0 + 0.12);
+      }
+    }
+    // プレイヤーが敵に攻撃されたとき、近くのトトが吠える (敵の方を向く)
+    function petsBark() {
+      const t = clock.getElapsedTime();
+      for (const m of passiveMobs) {
+        if (m.userData.def.key !== 'toto') continue;
+        const dx = m.position.x - camera.position.x, dz = m.position.z - camera.position.z;
+        if (dx * dx + dz * dz > 26 * 26) continue;
+        const ud = m.userData;
+        ud.barkTimer = 1.1;
+        const foe = nearestHostileTo(m, 32) || nearestWardenTo(m, 32);
+        if (foe) { ud.heading = Math.atan2(foe.position.x - m.position.x, foe.position.z - m.position.z); m.rotation.y = ud.heading + ud.def.facing; }
+        if (t - (ud.lastBark || -1) > 0.5) {
+          ud.lastBark = t;
+          spawnBarkText(m.position.x, m.position.y + (ud.def.height || 0.6) + 0.5, m.position.z);
+          if (controls.isLocked) playBarkSound();
+        }
+      }
+    }
+
     // シュー音 (起爆中) - Web Audio API のホワイトノイズ + ハイパス
     function startCreeperHiss(c) {
       const ctx = getAudioCtx();
@@ -4084,6 +4180,7 @@
 
     function killCreeper(group, drop) {
       if (drop) {
+        spawnHitBurst(group);  // プレイヤー撃破時のダメージヒット火花
         dropMobLoot('creeper', group.position.x, group.position.y, group.position.z);
         spawnXPOrbs(group.position.x, group.position.y + 0.5, group.position.z, 5);
       }
@@ -4302,6 +4399,7 @@
     function hitWarden(group, damage, attacker) {
       group.userData.hp -= (damage || 4);
       group.userData.hitFlash = 0.5;
+      spawnHitBurst(group);  // ダメージヒットの火花
       // モブに殴られたら、そのモブを標的にして一定時間 反撃する
       if (attacker && attacker.parent) {
         group.userData.targetMob = attacker;
@@ -4400,7 +4498,7 @@
       const los = sonicLineOfSight(w);
       spawnSonicBeam(w, los.point);  // 遮られた時は壁の手前までしか伸ばさない
       // 壁などの障害物に遮られていなければダメージ (透過して当てることはない)
-      if (!los.blocked && dist < WARDEN_SONIC_MAX + 5) damagePlayer(WARDEN_SONIC_DAMAGE, true);
+      if (!los.blocked && dist < WARDEN_SONIC_MAX + 5) damagePlayer(WARDEN_SONIC_DAMAGE, true, false, true);
     }
 
     function updateWardenHUD(nearest, dist) {
@@ -4515,7 +4613,7 @@
         // 近接攻撃 (張り付いて殴る)
         if (dist < WARDEN_MELEE_RANGE && Math.abs(dy) < 3) {
           if (ud.meleeCd <= 0) {
-            damagePlayer(WARDEN_MELEE_DAMAGE);
+            damagePlayer(WARDEN_MELEE_DAMAGE, false, false, true);
             ud.meleeCd = WARDEN_MELEE_COOLDOWN;
             playWardenSound('roar', dist);
             w.scale.setScalar(1.1);
@@ -4772,6 +4870,7 @@
     function hitFish(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.6;
+      spawnHitBurst(group);  // ダメージヒットの火花
       if (group.userData.hp <= 0) killFish(group, true);
     }
 
@@ -4931,6 +5030,7 @@
     function hitZombie(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.5;
+      spawnHitBurst(group);  // ダメージヒットの火花
       if (group.userData.hp <= 0) killZombie(group, true);
     }
 
@@ -5000,7 +5100,7 @@
         // 近接攻撃 (張り付いて殴る)
         if (dist < ZOMBIE_MELEE_RANGE && Math.abs(dy) < 2.5) {
           if (ud.meleeCd <= 0) {
-            damagePlayer(ZOMBIE_MELEE_DAMAGE);
+            damagePlayer(ZOMBIE_MELEE_DAMAGE, false, false, true);
             ud.meleeCd = ZOMBIE_MELEE_COOLDOWN;
             zm.scale.setScalar(1.08);
             setTimeout(() => { if (zm.parent) zm.scale.setScalar(1); }, 100);
@@ -5110,6 +5210,7 @@
     function hitSlimeKnight(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.5;
+      spawnHitBurst(group);  // ダメージヒットの火花
       if (group.userData.hp <= 0) killSlimeKnight(group, true);
     }
 
@@ -5256,7 +5357,7 @@
         // 近接攻撃 (剣で斬る)
         if (dist < SK_MELEE_RANGE && Math.abs(dy) < 2.5) {
           if (ud.meleeCd <= 0) {
-            damagePlayer(SK_MELEE_DAMAGE);
+            damagePlayer(SK_MELEE_DAMAGE, false, false, true);
             ud.meleeCd = SK_MELEE_COOLDOWN;
             ud.hopPhase = Math.PI / 2;   // 斬りかかる瞬間にぴょんと跳ねる
           }
@@ -5321,7 +5422,7 @@
           // スケルトンの矢 → プレイヤーに当たる (体の中心あたりで判定)
           const pdx = camera.position.x - nx, pdy = (camera.position.y - 0.7) - ny, pdz = camera.position.z - nz;
           if (pdx * pdx + pdy * pdy + pdz * pdz < 0.85 * 0.85) {
-            damagePlayer(ud.damage);
+            damagePlayer(ud.damage, false, false, true);
             consumed = true;
           }
         } else {
@@ -5449,6 +5550,7 @@
     function hitSkeleton(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.5;
+      spawnHitBurst(group);  // ダメージヒットの火花
       if (group.userData.hp <= 0) killSkeleton(group, true);
     }
 
@@ -5604,6 +5706,7 @@
     function hitGolem(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.5;
+      spawnHitBurst(group);  // ダメージヒットの火花
       if (group.userData.hp <= 0) killGolem(group, true);
     }
 
@@ -5890,7 +5993,7 @@
       const distToPlayer = Math.sqrt(dPX * dPX + dPY * dPY + dPZ * dPZ);
       if (distToPlayer < EXPLOSION_RADIUS + 1.5) {
         const dmg = Math.floor(EXPLOSION_MAX_DAMAGE * (1 - distToPlayer / (EXPLOSION_RADIUS + 1.5)));
-        if (dmg > 0) damagePlayer(dmg, true);
+        if (dmg > 0) damagePlayer(dmg, true, false, true);
       }
       // 受動Mob (ブタ・村人・チキン) を巻き込み撃破
       for (let i = passiveMobs.length - 1; i >= 0; i--) {
@@ -6105,8 +6208,8 @@
       { key: 'slime',    file: '3D/スライム.glb', height: 0.4, target: 10, speed: 1.4, hp: 8,  facing: 0, template: null, dimX: 0.34, dimZ: 0.34, radius: 0.18, hop: true, cave: true },
       // バブルスライム: ドラクエの毒スライム。スライム同様ぴょんぴょん跳ねる。スライムボールをドロップ
       { key: 'bubbleslime', file: '3D/バブルスライム.glb', height: 0.5, target: 8, speed: 1.4, hp: 8, facing: 0, template: null, dimX: 0.4, dimZ: 0.4, radius: 0.2, hop: true, cave: true },
-      // トト: ボストンテリアの犬。友好的に歩き回る (ペット枠)。walk=歩行時に小走りアニメ
-      { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 4, speed: 1.5, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28, walk: true },
+      // トト: ボストンテリアの犬。プレイヤーに付いてくるペット。敵に攻撃されると吠える。walk=小走りアニメ
+      { key: 'toto',     file: '3D/ボストンテリア_トト.glb', height: 0.6, target: 1, speed: 1.6, hp: 8, facing: 0, template: null, dimX: 0.5, dimZ: 0.5, radius: 0.28, walk: true, pet: true },
     ];
     const PMOB_SPAWN_MIN = 14;        // この距離より近くには湧かない
     const PMOB_SPAWN_MAX = 48;        // この距離より遠くには湧かない (LOAD_RADIUS=66 以内)
@@ -6205,6 +6308,7 @@
     function hitPassiveMob(group, damage) {
       group.userData.hp -= (damage || PMOB_ATTACK_DAMAGE);
       group.userData.hitFlash = 0.6;
+      spawnHitBurst(group);  // ダメージヒットの火花
       // 村人は本家同様、被弾/死亡で声を出す
       if (group.userData.def.key === 'villager') {
         const sdx = camera.position.x - group.position.x;
@@ -6486,6 +6590,8 @@
           ud.hitFlash = Math.max(0, ud.hitFlash - dt * 2);
           setCreeperFlash(m, ud.hitFlash);  // 汎用フラッシュ (任意のGroupに適用可)
         }
+        // トトの吠えタイマー減衰 (吠えアニメに使用)
+        if (ud.barkTimer > 0) ud.barkTimer = Math.max(0, ud.barkTimer - dt);
 
         // 子供の成長: 時間経過で大人サイズへ (本家準拠)
         if (ud.babyT !== undefined && ud.babyT < BABY_GROW_TIME) {
@@ -6523,7 +6629,12 @@
             // 動いている間だけ体を上下に弾ませ前後に揺らして「小走り」に見せる
             if (def.walk) {
               const moving = (ud.state === 'walk' || ud.state === 'flee' || ud.state === 'aggro');
-              if (moving) {
+              if (ud.barkTimer > 0) {
+                // 吠え中: その場で素早く弾んで威嚇する
+                ud.walkPhase += dt * 22;
+                h += Math.abs(Math.sin(ud.walkPhase)) * 0.13;
+                ud.visual.rotation.x = -0.18 + Math.sin(ud.walkPhase) * 0.1;  // 少し顔を上げて吠える
+              } else if (moving) {
                 ud.walkPhase += dt * 11;                              // 歩幅の速さ
                 h += Math.abs(Math.sin(ud.walkPhase)) * 0.09;        // 上下のバウンド (一歩ごと)
                 ud.visual.rotation.x = Math.sin(ud.walkPhase * 2) * 0.14;  // 前後のピッチ揺れ
@@ -6677,6 +6788,43 @@
             continue;
           }
           // 相手が見つからない間は通常の徘徊にフォールスルー (本家同様うろうろする)
+        }
+
+        // --- ペット (トト): プレイヤーに付いてくる。離れすぎたらワープして合流 (本家の犬と同様) ---
+        if (def.pet) {
+          const pdx = camera.position.x - m.position.x;
+          const pdz = camera.position.z - m.position.z;
+          const pdist = Math.sqrt(pdx * pdx + pdz * pdz) || 0.0001;
+          if (pdist > 32) {                                   // 遠すぎ: プレイヤー近くへワープ
+            const tx = Math.round(camera.position.x + (Math.random() * 4 - 2));
+            const tz = Math.round(camera.position.z + (Math.random() * 4 - 2));
+            const ty = creeperGroundY(tx, tz);
+            if (ty !== null) { m.position.set(tx, ty, tz); ud.groundY = ty; setMobGroundTarget(ud, ty, 0); }
+            ud.state = 'pause';
+            continue;
+          }
+          if (ud.barkTimer > 0) { ud.state = 'pause'; continue; }  // 吠え中はその場で威嚇 (向きは敵向き)
+          if (pdist > 2.6) {                                  // 追従 (遠いほど速く走る)
+            ud.state = 'walk';
+            ud.heading = Math.atan2(pdx, pdz);
+            const pspeed = def.speed * (pdist > 7 ? 1.9 : 1.1);
+            const dirX = Math.sin(ud.heading), dirZ = Math.cos(ud.heading);
+            const nx = m.position.x + dirX * pspeed * dt;
+            const nz = m.position.z + dirZ * pspeed * dt;
+            const gref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
+            const ny = creeperGroundY(nx, nz, gref + PMOB_STEP_HEIGHT);
+            if (ny !== null && ny - gref <= PMOB_STEP_HEIGHT && waterDepthAt(nx, nz) < MOB_DEEP_WATER) {
+              m.position.x = nx; m.position.z = nz;
+              setMobGroundTarget(ud, ny, MOB_STEP_HOP_DUR);
+              m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;
+            } else {
+              ud.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI * 0.3;  // 障害物を回り込む
+            }
+          } else {                                            // そば: 待機しプレイヤーの方を向く
+            ud.state = 'pause';
+            m.rotation.y = Math.atan2(pdx, pdz) + def.facing;
+          }
+          continue;
         }
 
         ud.stateTimer -= dt;
@@ -7115,10 +7263,11 @@
       return true;
     }
 
-    function damagePlayer(amount, ignoreInvuln = false, bypassArmor = false) {
+    function damagePlayer(amount, ignoreInvuln = false, bypassArmor = false, byMob = false) {
       if (playerHP <= 0) return;
       const now = clock.getElapsedTime();
       if (!ignoreInvuln && now - lastDamageTime < INVULN_DURATION) return;
+      if (byMob) petsBark();   // 敵に攻撃された → 近くのトトが吠える
       // 防具による軽減 (本家準拠: 飢餓/溺れ/落下/奈落には効かない)
       if (!bypassArmor) {
         const r = currentArmorReduce();
@@ -7488,6 +7637,8 @@
         updateCrops(dt);
         updateSaplings(dt);
         updateHearts(dt);
+        updateHitBursts(dt);   // 攻撃ヒットの火花
+        updateBarkTexts(dt);   // トトの「ワン！」吹き出し
 
         // 起爆中TNTの導火線進行 + 爆発
         updatePrimedTNT(dt);
@@ -7539,9 +7690,12 @@
             const tool = heldTool();
             const speedMult = (tool && tool.blocks.has(info.typeIndex)) ? tool.speed : 1;
             breakProgress += dt * speedMult;
-            breakBarEl.style.display = 'block';
+            const isFluid = (info.typeIndex === WATER_INDEX || info.typeIndex === LAVA_INDEX);
+            breakBarEl.style.display = isFluid ? 'none' : 'block';
             breakFillEl.style.width = `${Math.min(100, (breakProgress / hardness) * 100)}%`;
-            updateBreakOverlay(info.x, info.y, info.z, breakProgress / hardness);  // ヒビ割れ演出を更新
+            // ヒビ割れ演出を更新 (水・溶岩はヒビが入らないので出さない)
+            if (isFluid) hideBreakOverlay();
+            else updateBreakOverlay(info.x, info.y, info.z, breakProgress / hardness);
             if (breakProgress >= hardness) {
               const wasFluid = (info.typeIndex === WATER_INDEX || info.typeIndex === LAVA_INDEX);
               addExhaustion(EXHAUST_MINE);  // 採掘で満腹度を消耗 (本家準拠)
