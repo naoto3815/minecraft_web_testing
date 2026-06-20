@@ -263,18 +263,22 @@
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
       position: absolute;
-      width: 120px; height: 120px;
-      background: rgba(255,255,255,0.15);
+      left: 92px; bottom: 92px;            /* 左下に固定 (常に見えるので操作が分かる) */
+      width: 134px; height: 134px;
+      margin-left: -67px; margin-bottom: -67px;
+      background: rgba(255,255,255,0.13);
       border: 2px solid rgba(255,255,255,0.4);
       border-radius: 50%;
       pointer-events: none; z-index: 50;
       display: none;
     }
-    #touch-joystick.active { display: block; }
+    body.touch #touch-joystick { display: block; }   /* タッチ時は常時表示 */
+    #touch-joystick.active { background: rgba(255,255,255,0.20); }
     #touch-joystick-knob {
       position: absolute;
-      width: 50px; height: 50px;
+      width: 56px; height: 56px;
       background: rgba(255,255,255,0.55);
+      border: 2px solid rgba(255,255,255,0.7);
       border-radius: 50%;
       top: 50%; left: 50%;
       transform: translate(-50%, -50%);
@@ -282,33 +286,44 @@
     }
     #touch-buttons {
       position: absolute;
-      bottom: 90px; right: 24px;
-      flex-direction: column; gap: 14px;
+      bottom: 28px; right: 20px;
+      flex-direction: column; align-items: flex-end; gap: 12px;
       z-index: 50; display: none;
     }
     body.touch #touch-buttons { display: flex; }
+    #touch-buttons .row { display: flex; gap: 12px; }
     #touch-buttons button {
-      width: 70px; height: 70px;
       background: rgba(255,255,255,0.22);
       border: 2px solid rgba(255,255,255,0.55);
       border-radius: 50%;
-      color: white; font-size: 22px; font-weight: bold;
+      color: white; font-weight: bold;
       font-family: inherit; cursor: pointer;
       -webkit-tap-highlight-color: transparent;
       user-select: none; touch-action: manipulation;
+      display: flex; align-items: center; justify-content: center;
+      line-height: 1;
     }
+    #touch-buttons button.primary { width: 82px; height: 82px; font-size: 17px; }
+    #touch-buttons button.small { width: 58px; height: 58px; font-size: 14px; }
     #touch-buttons button:active { background: rgba(255,255,255,0.45); }
-    body.touch #info { font-size: 11px; max-width: 60vw; }
+    #touch-fly.on { background: rgba(120,200,255,0.5); border-color: rgba(180,230,255,0.9); }
+    body.touch #info { font-size: 11px; max-width: 64vw; }
+    .touch-only { display: none; }
+    body.touch .pc-only { display: none; }
+    body.touch .touch-only { display: inline; }
   </style>
 </head>
 <body>
   <div id="info">
     <strong>操作</strong><br>
-    WASD: 移動  /  Space: ジャンプ<br>
+    <span class="pc-only">WASD: 移動  /  Space: ジャンプ<br>
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
-    1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14n ・ ブロック破壊時にヒビ割れ演出を追加</span>
+    1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br></span>
+    <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
+    採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
+    下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14o ・ スマホ操作を刷新 (PCと同等の操作に対応)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -339,8 +354,15 @@
   <!-- タッチデバイス専用UI (CSS で body.touch のみ表示) -->
   <div id="touch-joystick"><div id="touch-joystick-knob"></div></div>
   <div id="touch-buttons">
-    <button id="touch-jump" type="button">⇧</button>
-    <button id="touch-place" type="button">置</button>
+    <div class="row">
+      <button id="touch-fly" class="small" type="button">飛行</button>
+      <button id="touch-down" class="small" type="button">下降</button>
+      <button id="touch-jump" class="small" type="button">ジャンプ</button>
+    </div>
+    <div class="row">
+      <button id="touch-use" class="primary" type="button">設置<br>使う</button>
+      <button id="touch-mine" class="primary" type="button">採掘<br>攻撃</button>
+    </div>
   </div>
 
   <script type="importmap">
@@ -3168,7 +3190,8 @@
     const breakBarEl = document.getElementById('breakbar');
     const breakFillEl = document.getElementById('breakfill');
 
-    addEventListener('mousedown', (e) => {
+    // ポインタ押下処理 (マウス / タッチボタン共通)。e.button: 0=破壊/攻撃, 2=設置/使用
+    function onPointerDown(e) {
       if (!controls.isLocked || anyUIOpen()) return;
       // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
       if (e.button === 2 && tryEatSelected()) return;
@@ -3444,9 +3467,11 @@
           }
         }
       }
-    });
+    }
+    addEventListener('mousedown', onPointerDown);
 
-    addEventListener('mouseup', (e) => {
+    // ポインタ解放処理 (マウス / タッチボタン共通)。左ボタン解放で採掘を止める
+    function onPointerUp(e) {
       if (e.button !== 0) return;
       mouseDown = false;
       breakTargetKey = null;
@@ -3454,7 +3479,8 @@
       breakProgress = 0;
       breakBarEl.style.display = 'none';
       hideBreakOverlay();
-    });
+    }
+    addEventListener('mouseup', onPointerUp);
 
     addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -7140,16 +7166,14 @@
     if (isTouch) {
       const joystickEl = document.getElementById('touch-joystick');
       const joystickKnobEl = document.getElementById('touch-joystick-knob');
-      const jumpBtn = document.getElementById('touch-jump');
-      const placeBtn = document.getElementById('touch-place');
       const canvas = renderer.domElement;
 
       let joystickId = null;
-      const joyCenter = { x: 0, y: 0 };
+      const joyCenter = { x: 0, y: 0 };   // スティックの基準点 (最初に触れた位置)
       let lookId = null;
       const lookLast = { x: 0, y: 0 };
-      let lookMovedDist = 0;
       const ROT_SPEED = 0.004;
+      const JOY_RADIUS = 44;              // ノブの最大移動量
       const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 
       function isOnTouchUI(target) {
@@ -7157,7 +7181,8 @@
           target.closest('#touch-buttons') ||
           target.closest('#hotbar') ||
           target.closest('#startmsg') ||
-          target.closest('#gameover')
+          target.closest('#gameover') ||
+          target.closest('#craftbtn')
         ));
       }
 
@@ -7166,24 +7191,16 @@
         for (const t of e.changedTouches) {
           if (isOnTouchUI(t.target)) continue;
           if (t.clientX < innerWidth / 2 && joystickId === null) {
-            // 左半分: ジョイスティック開始
+            // 左半分: 移動スティック (触れた位置を基準にする / 表示ベースは左下固定)
             joystickId = t.identifier;
             joyCenter.x = t.clientX;
             joyCenter.y = t.clientY;
-            joystickEl.style.left = (t.clientX) + 'px';
-            joystickEl.style.top = (t.clientY) + 'px';
-            joystickEl.style.transform = 'translate(-50%, -50%)';
             joystickEl.classList.add('active');
           } else if (t.clientX >= innerWidth / 2 && lookId === null) {
-            // 右半分: 視点回転 + (動かなければ採掘)
+            // 右半分: 視点回転のみ (採掘は専用ボタンで行う)
             lookId = t.identifier;
             lookLast.x = t.clientX;
             lookLast.y = t.clientY;
-            lookMovedDist = 0;
-            // 採掘開始 (大きく動いたらキャンセル)
-            mouseDown = true;
-            mineStrikeCount = 0;
-            startHandSwing();
           }
         }
         e.preventDefault();
@@ -7194,12 +7211,12 @@
           if (t.identifier === joystickId) {
             const dx = t.clientX - joyCenter.x;
             const dy = t.clientY - joyCenter.y;
-            const dist = Math.min(Math.hypot(dx, dy), 50);
+            const dist = Math.min(Math.hypot(dx, dy), JOY_RADIUS);
             const ang = Math.atan2(dy, dx);
             const kx = Math.cos(ang) * dist;
             const ky = Math.sin(ang) * dist;
             joystickKnobEl.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
-            const T = 12;
+            const T = 11;
             move.l = kx < -T;
             move.r = kx > T;
             move.f = ky < -T;
@@ -7209,15 +7226,12 @@
             const dy = t.clientY - lookLast.y;
             lookLast.x = t.clientX;
             lookLast.y = t.clientY;
-            lookMovedDist += Math.hypot(dx, dy);
             // カメラ回転 (YXZ Euler でPointerLockと同等)
             lookEuler.setFromQuaternion(camera.quaternion);
             lookEuler.y -= dx * ROT_SPEED;
             lookEuler.x -= dy * ROT_SPEED;
             lookEuler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, lookEuler.x));
             camera.quaternion.setFromEuler(lookEuler);
-            // 大きく動いた = 視点回転のみ → 採掘キャンセル
-            if (lookMovedDist > 10 && mouseDown) mouseDown = false;
           }
         }
         e.preventDefault();
@@ -7232,52 +7246,46 @@
             move.l = move.r = move.f = move.b = false;
           } else if (t.identifier === lookId) {
             lookId = null;
-            mouseDown = false;
-            breakTargetKey = null;
-            breakTargetType = null;
-            breakProgress = 0;
-            breakBarEl.style.display = 'none';
           }
         }
       }
       canvas.addEventListener('touchend', endTouch);
       canvas.addEventListener('touchcancel', endTouch);
 
-      // ジャンプボタン
-      jumpBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (controls.isLocked && onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); }
+      // 押している間だけ on/off するボタンを束ねるヘルパ
+      const bindHold = (id, onDown, onUp) => {
+        const el = document.getElementById(id);
+        el.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); if (controls.isLocked) onDown(); }, { passive: false });
+        const up = (e) => { e.preventDefault(); e.stopPropagation(); if (onUp) onUp(); };
+        el.addEventListener('touchend', up); el.addEventListener('touchcancel', up);
+      };
+
+      // 採掘/攻撃ボタン: 押下=左クリック相当 (ブロックは長押しで連続採掘+ヒビ演出 / Mobは攻撃)
+      bindHold('touch-mine', () => onPointerDown({ button: 0 }), () => onPointerUp({ button: 0 }));
+
+      // 設置/使うボタン: 押下=右クリック相当 (設置・食べる・弓・農具・かまど/ベッド/チェスト 等すべて)
+      const useBtn = document.getElementById('touch-use');
+      useBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (controls.isLocked && !anyUIOpen()) onPointerDown({ button: 2 });
       }, { passive: false });
 
-      // 設置ボタン (画面中央にレイ→隣接ブロック設置)
-      placeBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!controls.isLocked || anyUIOpen()) return;
-        if (tryEatSelected()) return;  // 食料を選択中なら食べる
-        raycaster.setFromCamera(centerScreen, camera);
-        const hits = raycaster.intersectObjects(instancedMeshes, false);
-        if (hits.length === 0 || hits[0].distance > 8) return;
-        const info = blockFromHit(hits[0]);
-        if (!info) return;
-        if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }  // かまどをタップ → 精錬メニュー
-        if (info.typeIndex === BED_INDEX) { trySleepInBed(info); return; }   // ベッドをタップ → 就寝
-        if (info.typeIndex === CHEST_INDEX) { openChest(info); return; }     // チェストをタップ → 保管
-        const it = selectedItem();
-        if (!it || it.kind !== 'block' || inventory[it.i] <= 0) return;
-        const bi = it.i;
-        const n = hits[0].face.normal;
-        const px = Math.round(info.x + n.x);
-        const py = Math.round(info.y + n.y);
-        const pz = Math.round(info.z + n.z);
-        if (addBlock(px, py, pz, bi)) {
-          recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
-          inventory[bi]--;
-          updateHotbar();
-          startHandSwing();
-          if (bi === WATER_INDEX || bi === LAVA_INDEX) flowFrom([key(px, py, pz)]);  // 設置した流体が流れ出す
-        }
+      // ジャンプ/上昇ボタン: 飛行中は押している間だけ上昇、地上では1回ジャンプ
+      bindHold('touch-jump',
+        () => { if (flying) move.up = true; else if (onGround) { velocityY = JUMP; addExhaustion(EXHAUST_JUMP); } },
+        () => { move.up = false; });
+
+      // 下降ボタン (飛行中のみ意味を持つ)
+      bindHold('touch-down', () => { move.down = true; }, () => { move.down = false; });
+
+      // 飛行ON/OFFボタン
+      const flyBtn = document.getElementById('touch-fly');
+      flyBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        if (!controls.isLocked) return;
+        flying = !flying; velocityY = 0;
+        flyBtn.classList.toggle('on', flying);
+        if (typeof showToast === 'function') showToast(flying ? '飛行モード ON  (ジャンプ:上昇 / 下降ボタン:下降)' : '飛行モード OFF');
       }, { passive: false });
     }
 
