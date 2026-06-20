@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14g ・ ゲームオーバーでブロックを初期状態に戻す</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14h ・ 座標(99,-13)に雪山を追加</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2163,6 +2163,13 @@
       return (dx * dx + dz * dz) >= 16;  // プレイヤー直上には湧かせない
     }
 
+    // 山 (指定座標にそびえる山。中心でピーク、周囲の自然地形へなめらかにブレンド)
+    const MOUNTAIN_CX = 99, MOUNTAIN_CZ = -13;  // 山の中心
+    const MOUNTAIN_PEAK = 50;                   // 中心の標高 (最大の高さ)
+    const MOUNTAIN_RADIUS = 42;                 // この半径で自然地形へ戻る
+    const SNOW_INDEX = 6;
+    const MOUNTAIN_SNOW_Y = 36;                 // この高さより上は雪冠
+
     function terrainHeight(x, z) {
       // 4オクターブのフラクタルノイズ (amplitude 1/2 ずつ、freq 2倍ずつ)
       let h = 0;
@@ -2177,7 +2184,19 @@
       }
       // [-totalAmp, totalAmp] → [0, 1] → [HEIGHT_MIN, HEIGHT_MAX]
       const t = (h / totalAmp + 1) * 0.5;
-      const natural = Math.floor(HEIGHT_MIN + t * (HEIGHT_MAX - HEIGHT_MIN + 1));
+      let natural = Math.floor(HEIGHT_MIN + t * (HEIGHT_MAX - HEIGHT_MIN + 1));
+      // 山を盛り上げる (村・ダンジョンの外のみ。中心=ピーク、縁=自然地形へ smoothstep ブレンド)
+      if (!inVillage(x, z) && !inDungeon(x, z)) {
+        const mdx = x - MOUNTAIN_CX, mdz = z - MOUNTAIN_CZ;
+        const md = Math.sqrt(mdx * mdx + mdz * mdz);
+        if (md < MOUNTAIN_RADIUS) {
+          const w0 = 1 - md / MOUNTAIN_RADIUS;
+          // ノイズで稜線をすこしギザギザに (のっぺりした円錐を避ける)
+          const ridge = 1 + heightNoise(x * 0.08, z * 0.08) * 0.18;
+          const w = w0 * w0 * (3 - 2 * w0);  // smoothstep
+          natural = Math.round(natural * (1 - w) + MOUNTAIN_PEAK * ridge * w);
+        }
+      }
       // 村は平坦化 (周囲とはブレンドで滑らかに繋ぐ)
       const vb = villageBlend(x, z);
       if (vb <= 0) return natural;
@@ -2290,9 +2309,13 @@
       }
       const h = terrainHeight(cx, cz);
       const surface = getSurfaceType(cx, cz);
-      if (addBlock(cx, h,     cz, surface)) keys.push(key(cx, h, cz));     // 表面
-      if (addBlock(cx, h - 1, cz, surface)) keys.push(key(cx, h - 1, cz));
-      if (addBlock(cx, h - 2, cz, surface)) keys.push(key(cx, h - 2, cz));
+      // 高所は岩肌(石)、さらに上は雪冠。山らしい見た目に
+      const rocky = h >= 26;
+      const topBlk = (h >= MOUNTAIN_SNOW_Y) ? SNOW_INDEX : (rocky ? 2 : surface);
+      const subBlk = rocky ? 2 : surface;
+      if (addBlock(cx, h,     cz, topBlk)) keys.push(key(cx, h, cz));      // 表面
+      if (addBlock(cx, h - 1, cz, subBlk)) keys.push(key(cx, h - 1, cz));
+      if (addBlock(cx, h - 2, cz, subBlk)) keys.push(key(cx, h - 2, cz));
       if (addBlock(cx, h - 3, cz, 2))       keys.push(key(cx, h - 3, cz)); // 深層 (石)
       if (addBlock(cx, h - 4, cz, 2))       keys.push(key(cx, h - 4, cz));
       // 流体: 低地(谷)を WATER_LEVEL まで満たす。粗グリッド単位で溶岩湖/水を決める
@@ -2308,10 +2331,10 @@
       // 木 (土の上のみ・水没地と スポーン付近は避ける・決定論的に判定)。
       // 村の周囲(+2マスの余白)には生やさない: 木の葉が村の縁へはみ出して浮きブロックになるのを防ぐ
       const nearVillage = Math.abs(cx - VILLAGE_CX) <= VILLAGE_HALF + 2 && Math.abs(cz - VILLAGE_CZ) <= VILLAGE_HALF + 2;
-      if (surface === 1 && h >= WATER_LEVEL && !nearVillage &&
+      if (surface === 1 && h >= WATER_LEVEL && h < 26 && !nearVillage &&
           !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4) &&
           hashRand(cx, cz, 0) < TREE_CHANCE) {
-        plantTree(cx, h, cz, keys);
+        plantTree(cx, h, cz, keys);   // 山の上部(岩肌・雪)には生やさない
       }
       // プレイヤーの改変を反映 (掘った穴・置いたブロックを再現)
       const e = edits.get(ck);
