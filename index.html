@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14k ・ 山を全面グラスの自然な起伏に作り直し</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14l ・ 草原バイオーム(緑の草地+花/草)を実装</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2216,6 +2216,55 @@
       return b > 0.4 ? 3 : 1;  // 3=砂, 1=土
     }
 
+    // ===== 簡易バイオーム (今は全域「草原」。将来 気温/湿度ノイズで砂漠/雪原/森 等へ拡張可能) =====
+    const BIOME_PLAINS = { id: 'plains', name: '草原', treeChance: 0.011, plantChance: 0.09 };
+    function biomeAt(x, z) {
+      // TODO: 気温ノイズ・湿度ノイズで複数バイオームへ分岐
+      return BIOME_PLAINS;
+    }
+
+    // 草原の装飾植物 (花・草)。装飾のみ・非衝突。列(colKey)に紐づけてストリーミング破棄する。
+    const decorations = new Map();  // colKey → THREE.Group
+    // 十字(2枚直交)を1メッシュにまとめた軽量ジオメトリ (描画コール削減。根元 y=0 → 上 y=hgt)
+    function crossGeometry(w, hgt) {
+      const hw = w / 2;
+      const pos = [-hw, 0, 0, hw, 0, 0, hw, hgt, 0, -hw, hgt, 0,  0, 0, -hw, 0, 0, hw, 0, hgt, hw, 0, hgt, -hw];
+      const uv = [0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1];
+      const nor = [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0];
+      const idx = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      g.setIndex(idx);
+      return g;
+    }
+    const _tallGrassGeo = crossGeometry(0.85, 0.55);
+    const _flowerStemGeo = crossGeometry(0.14, 0.46);
+    const _flowerHeadGeo = crossGeometry(0.34, 0.22);
+    const _grassMat = new THREE.MeshLambertMaterial({ color: 0x6FB23E, side: THREE.DoubleSide, transparent: true, opacity: 0.92 });
+    const _stemMat = new THREE.MeshLambertMaterial({ color: 0x4E8A3C, side: THREE.DoubleSide });
+    const FLOWER_COLORS = [0xE7402E, 0xF2C40F, 0xF6F2E8, 0xE8822E, 0xE87FB4, 0x9B6FD0];  // 赤・黄・白・橙・桃・紫
+    const _flowerHeadMats = FLOWER_COLORS.map(c => new THREE.MeshLambertMaterial({ color: c, side: THREE.DoubleSide }));
+
+    // (cx,cz) に置く装飾植物を返す (無ければ null)。決定論的 (hashRand) なので再生成で同じ
+    function makePlant(cx, cz, biome) {
+      if (hashRand(cx, cz, 71) >= biome.plantChance) return null;
+      const g = new THREE.Group();
+      if (hashRand(cx, cz, 72) < 0.72) {
+        g.add(new THREE.Mesh(_tallGrassGeo, _grassMat));                 // 背の高い草
+      } else {
+        g.add(new THREE.Mesh(_flowerStemGeo, _stemMat));                 // 花 (茎)
+        const ci = Math.min(FLOWER_COLORS.length - 1, Math.floor(hashRand(cx, cz, 73) * FLOWER_COLORS.length));
+        const head = new THREE.Mesh(_flowerHeadGeo, _flowerHeadMats[ci]);
+        head.position.y = 0.38;
+        g.add(head);
+      }
+      g.rotation.y = hashRand(cx, cz, 74) * Math.PI;
+      g.userData.isDecoration = true;
+      return g;
+    }
+
     // ===== 無限地形: 半径ストリーミング =====
     // プレイヤーの周囲だけを生成し、遠くは破棄する。地形は terrainHeight() から
     // いつでも再生成できるので、改変分(edits)だけ覚えておけば建築・採掘は保たれる。
@@ -2315,10 +2364,14 @@
         return;
       }
       const h = terrainHeight(cx, cz);
-      const surface = getSurfaceType(cx, cz);
-      if (addBlock(cx, h,     cz, surface)) keys.push(key(cx, h, cz));     // 表面 (山も草で覆う)
-      if (addBlock(cx, h - 1, cz, surface)) keys.push(key(cx, h - 1, cz));
-      if (addBlock(cx, h - 2, cz, surface)) keys.push(key(cx, h - 2, cz));
+      const biome = biomeAt(cx, cz);
+      // 草原バイオーム: 水際は砂浜(砂)、それ以外は緑の草ブロック(上)+土(下)。ランダムな砂パッチは作らない
+      const beach = h <= WATER_LEVEL + 1;
+      const topBlk = beach ? 3 : GRASS_INDEX;   // 3=砂, 0=草
+      const subBlk = beach ? 3 : DIRT_INDEX;    // 1=土
+      if (addBlock(cx, h,     cz, topBlk)) keys.push(key(cx, h, cz));      // 表面 (緑の草)
+      if (addBlock(cx, h - 1, cz, subBlk)) keys.push(key(cx, h - 1, cz));
+      if (addBlock(cx, h - 2, cz, subBlk)) keys.push(key(cx, h - 2, cz));
       if (addBlock(cx, h - 3, cz, 2))       keys.push(key(cx, h - 3, cz)); // 深層 (石)
       if (addBlock(cx, h - 4, cz, 2))       keys.push(key(cx, h - 4, cz));
       // 流体: 低地(谷)を WATER_LEVEL まで満たす。粗グリッド単位で溶岩湖/水を決める
@@ -2334,10 +2387,17 @@
       // 木 (土の上のみ・水没地と スポーン付近は避ける・決定論的に判定)。
       // 村の周囲(+2マスの余白)には生やさない: 木の葉が村の縁へはみ出して浮きブロックになるのを防ぐ
       const nearVillage = Math.abs(cx - VILLAGE_CX) <= VILLAGE_HALF + 2 && Math.abs(cz - VILLAGE_CZ) <= VILLAGE_HALF + 2;
-      if (surface === 1 && h >= WATER_LEVEL && !nearVillage &&
-          !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4) &&
-          hashRand(cx, cz, 0) < TREE_CHANCE) {
-        plantTree(cx, h, cz, keys);   // 山も含め草地には木を生やす
+      const grassland = !beach && h >= WATER_LEVEL && !nearVillage &&
+          !(Math.abs(cx - SPAWN_CX) < 4 && Math.abs(cz - SPAWN_CZ) < 4);
+      let treePlaced = false;
+      if (grassland && hashRand(cx, cz, 0) < biome.treeChance) {
+        plantTree(cx, h, cz, keys);   // 草原はまばらに木が生える
+        treePlaced = true;
+      }
+      // 草原の装飾植物 (花・草)。木が無い草地に決定論的に配置 (改変として保存はしない)
+      if (grassland && !treePlaced) {
+        const plant = makePlant(cx, cz, biome);
+        if (plant) { plant.position.set(cx, h + 0.5, cz); scene.add(plant); decorations.set(ck, plant); }
       }
       // プレイヤーの改変を反映 (掘った穴・置いたブロックを再現)
       const e = edits.get(ck);
@@ -2360,6 +2420,8 @@
         removeBlock(bx, by, bz);
       }
       loadedColumns.delete(ck);
+      const dec = decorations.get(ck);  // 装飾植物も一緒に破棄
+      if (dec) { scene.remove(dec); decorations.delete(ck); }
       unloadDeepColumn(ck);  // 地表を捨てるときは地中も一緒に
     }
 
