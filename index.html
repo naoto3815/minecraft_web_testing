@@ -323,7 +323,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14q ・ 何もない所でも左クリックで腕を振れるように(空振り対応)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14r ・ 左クリック押しっぱなしで連打(Mob連続攻撃)に対応</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -3187,12 +3187,17 @@
     let breakTargetKey = null;   // 対象ブロックの位置キー "x,y,z"
     let breakTargetType = null;  // 対象ブロックの種別
     let breakProgress = 0;
+    let primaryHeld = false;          // 左ボタン押しっぱなし中か (Mob/空振りの連打用)
+    let attackRepeatTimer = 0;        // 連打の次の一撃までの残り時間
+    const ATTACK_REPEAT_INTERVAL = 0.25;  // 押しっぱなし時の攻撃/空振りの間隔(秒)
     const breakBarEl = document.getElementById('breakbar');
     const breakFillEl = document.getElementById('breakfill');
 
     // ポインタ押下処理 (マウス / タッチボタン共通)。e.button: 0=破壊/攻撃, 2=設置/使用
     function onPointerDown(e) {
       if (!controls.isLocked || anyUIOpen()) return;
+      // 左クリック押下: 押しっぱなしで連打できるよう状態と次撃タイマーを更新
+      if (e.button === 0) { primaryHeld = true; attackRepeatTimer = ATTACK_REPEAT_INTERVAL; }
       // 右クリック: 食料を選択中なら食べて HP 回復 (照準先に関係なく)
       if (e.button === 2 && tryEatSelected()) return;
       // 弓を装備中の右クリック: 矢を放つ (照準先に関係なく飛ぶ)
@@ -3478,6 +3483,7 @@
     function onPointerUp(e) {
       if (e.button !== 0) return;
       mouseDown = false;
+      primaryHeld = false;
       breakTargetKey = null;
       breakTargetType = null;
       breakProgress = 0;
@@ -7676,6 +7682,16 @@
 
         // ダッシュ中は満腹度を消耗
         if (isDashing && (move.f && !move.b)) addExhaustion(EXHAUST_SPRINT_PER_SEC * dt);
+
+        // 左クリック押しっぱなしの連打 (Mobへの連続攻撃・空振り)。
+        // ブロック採掘中(mouseDown=true)は下の採掘ループが担当するのでスキップ。
+        if (primaryHeld && !mouseDown) {
+          attackRepeatTimer -= dt;
+          if (attackRepeatTimer <= 0) {
+            attackRepeatTimer = ATTACK_REPEAT_INTERVAL;
+            onPointerDown({ button: 0 });   // 再度の一撃 (照準先を再判定して攻撃/空振り)
+          }
+        }
 
         // ブロック破壊の進行 (左クリック長押し)
         if (mouseDown) {
