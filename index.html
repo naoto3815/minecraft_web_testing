@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14i ・ ダンジョンのTNT跡もリロードで復元</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14j ・ ゲームオーバーで世界全体を初期状態に復元</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -3400,6 +3400,7 @@
     }
 
     function saveTorches() {
+      if (worldResetOnGameOver) return;  // ゲームオーバー後は保存しない (初期状態を保つ)
       try {
         const arr = [];
         for (const [k, g] of torches) arr.push({ k, n: g.userData.wallN || null });
@@ -3532,6 +3533,7 @@
       if (cropSaveTimer) clearTimeout(cropSaveTimer);
       cropSaveTimer = setTimeout(() => {
         cropSaveTimer = null;
+        if (worldResetOnGameOver) return;
         try {
           const arr = [];
           for (const [k, g] of crops) arr.push({ k, s: g.userData.stage, t: Math.round(g.userData.t) });
@@ -3641,6 +3643,7 @@
       if (saplingSaveTimer) clearTimeout(saplingSaveTimer);
       saplingSaveTimer = setTimeout(() => {
         saplingSaveTimer = null;
+        if (worldResetOnGameOver) return;
         try {
           const arr = [];
           for (const [k, g] of saplings) arr.push({ k, t: Math.round(g.userData.t) });
@@ -6960,11 +6963,19 @@
       if (playerHP <= 0) {
         controls.unlock();
         gameoverEl.classList.add('show');
-        // 壊した/置いたブロックの改変を破棄 → リトライ(再読込)で初期ブロック状態に戻す
+        // 世界の改変をすべて破棄 → リトライ(再読込)で初期状態に戻す。
+        // ブロック(掘った/置いた)・松明・作物・苗木をクリア (村/ダンジョンの飾りは再生成される)。
         worldResetOnGameOver = true;
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+        if (cropSaveTimer) { clearTimeout(cropSaveTimer); cropSaveTimer = null; }
+        if (saplingSaveTimer) { clearTimeout(saplingSaveTimer); saplingSaveTimer = null; }
         edits.clear();
-        try { localStorage.removeItem(SAVE_KEY); } catch (e) { /* 無視 */ }
+        try {
+          localStorage.removeItem(SAVE_KEY);
+          localStorage.removeItem(TORCH_SAVE_KEY);
+          localStorage.removeItem(CROP_SAVE_KEY);
+          localStorage.removeItem(SAPLING_SAVE_KEY);
+        } catch (e) { /* 無視 */ }
         bgm.pause();
         // ユーザー指定の YouTube 曲を再生。未準備/失敗時は mp3 → 合成BGM にフォールバック
         if (!playGameOverYouTube()) {
