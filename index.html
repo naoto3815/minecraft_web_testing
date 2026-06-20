@@ -224,20 +224,20 @@
       pointer-events: auto; font-family: inherit;
     }
     #craftbtn:hover { background: rgba(255,255,255,0.18); }
-    #craftpanel, #furnacepanel, #chestpanel, #tradepanel {
+    #craftpanel, #furnacepanel, #chestpanel, #tradepanel, #shoppanel {
       position: absolute; inset: 0; z-index: 100; display: none;
       background: rgba(0,0,0,0.72);
       align-items: center; justify-content: center; pointer-events: auto;
     }
-    #craftpanel .panel, #furnacepanel .panel, #chestpanel .panel, #tradepanel .panel {
+    #craftpanel .panel, #furnacepanel .panel, #chestpanel .panel, #tradepanel .panel, #shoppanel .panel {
       background: #2b2b2b; border: 2px solid #888; border-radius: 10px;
       padding: 16px 20px 20px; max-width: 580px; width: 90%;
       max-height: 80vh; overflow: auto; color: #fff;
       font-family: sans-serif;
     }
-    #craftpanel h2, #furnacepanel h2, #chestpanel h2, #tradepanel h2 { margin: 0 0 2px; font-size: 20px; }
-    #craftpanel .hint, #furnacepanel .hint, #chestpanel .hint, #tradepanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
-    #craftpanel .grid, #furnacepanel .grid, #chestpanel .grid, #tradepanel .grid {
+    #craftpanel h2, #furnacepanel h2, #chestpanel h2, #tradepanel h2, #shoppanel h2 { margin: 0 0 2px; font-size: 20px; }
+    #craftpanel .hint, #furnacepanel .hint, #chestpanel .hint, #tradepanel .hint, #shoppanel .hint { font-size: 12px; opacity: 0.6; margin-bottom: 14px; }
+    #craftpanel .grid, #furnacepanel .grid, #chestpanel .grid, #tradepanel .grid, #shoppanel .grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); gap: 10px;
     }
     .recipe {
@@ -253,12 +253,12 @@
     .recipe.owned { opacity: 0.55; cursor: default; }
     .recipe.owned:hover { background: #3a3a3a; }
     .recipe.owned .rcost { color: #9fe6c4; }
-    #craftclose, #furnaceclose, #chestclose, #tradeclose {
+    #craftclose, #furnaceclose, #chestclose, #tradeclose, #shopclose {
       float: right; cursor: pointer; border: none;
       background: #555; color: #fff; border-radius: 5px;
       padding: 2px 11px; font-size: 18px; line-height: 1.3;
     }
-    #craftclose:hover, #furnaceclose:hover, #chestclose:hover, #tradeclose:hover { background: #777; }
+    #craftclose:hover, #furnaceclose:hover, #chestclose:hover, #tradeclose:hover, #shopclose:hover { background: #777; }
 
     /* タッチデバイス専用UI: 既定は非表示。body.touch で表示 */
     #touch-joystick {
@@ -323,7 +323,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14r ・ 左クリック押しっぱなしで連打(Mob連続攻撃)に対応</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14s ・ 初期装備=銅の剣 / 村に武器屋・防具屋(エメラルドで購入)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -542,7 +542,7 @@
 
     // ===== インベントリ & ホットバー =====
     const inventory = blockTypes.map(() => 0);  // 各ブロックの所持数 (初期0)
-    let tntCount = 64;  // TNT所持数 (本家同様にデフォルトで所持。ホットバー初期化より前に宣言)
+    let tntCount = 0;  // TNT所持数 (初期は0。クラフトで入手可。初期装備は銅の剣)
     // 一人称ビューで「手に持っているアイテム」の表示 (メッシュ実体は手の生成後に代入)
     let heldIconPlane = null;   // 道具・TNT 用のアイコン板
     let heldBlockCube = null;   // ブロック用の小立方体
@@ -633,10 +633,12 @@
         "<path d='M14.5 6.5 L16 9 L13 9.5 Z' fill='#c9c9c9'/></svg>");
     }
     TOOL_DEFS.push({ id: 'bow', type: 'bow', name: '弓', icon: bowIcon(), speed: 1, attack: 0, blocks: new Set(), special: true });
+    // 銅の剣 (初期装備。クラフト不可の特別枠。攻撃力は木と石の中間)
+    TOOL_DEFS.push({ id: 'copper_sword', type: 'sword', tier: 'copper', name: '銅の剣', icon: toolIcon('sword', '#C77B4E'), speed: 1, attack: 4, blocks: new Set(), special: true });
 
     const toolById = {};
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
-    const ownedTools = {};  // id -> true (道具は1個ずつ、重複所持なし)
+    const ownedTools = { copper_sword: true };  // id -> true (道具は1個ずつ)。開始時は銅の剣を所持
 
     // ===== 防具 — 本家準拠の被ダメージ軽減 (革=全身28% / 鉄=全身60% 相当) =====
     // 作ると自動で装備される。上位 (鉄) を持っていればそちらが優先。
@@ -1305,7 +1307,7 @@
       return chestData[k];
     }
 
-    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen; }
+    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen || shopOpen; }
 
     // ===== 村人との取引 — 本家準拠: エメラルドを通貨に売り買いする =====
     let tradeOpen = false;
@@ -1372,6 +1374,106 @@
       if (!tradeOpen) return;
       tradeOpen = false;
       tradePanelEl.style.display = 'none';
+      if (usingFallback) {
+        document.body.style.cursor = 'none';
+      } else if (relock) {
+        controls.lock();
+      } else {
+        startMsg.style.display = 'block';
+      }
+    }
+
+    // ===== 武器屋・防具屋 — エメラルドで武器/防具を購入して装備する =====
+    let shopOpen = false;
+    let currentShopType = null;
+    const SHOP_STOCK = {
+      weapon: [
+        { kind: 'tool', id: 'stone_sword', cost: 2 },
+        { kind: 'tool', id: 'iron_sword',  cost: 5 },
+        { kind: 'tool', id: 'bow',         cost: 4 },
+      ],
+      armor: [
+        { kind: 'armor', id: 'leather_armor', cost: 3 },
+        { kind: 'armor', id: 'iron_armor',    cost: 8 },
+      ],
+    };
+    const SHOP_TITLES = { weapon: '⚔ 武器屋', armor: '🛡 防具屋' };
+    const SHOP_HINTS = {
+      weapon: 'エメラルドが通貨。武器を買うとホットバーに追加され、すぐ装備に切り替わる。',
+      armor:  'エメラルドが通貨。防具を買うと自動で装備され、被ダメージが減る。',
+    };
+
+    const shopPanelEl = document.createElement('div');
+    shopPanelEl.id = 'shoppanel';
+    shopPanelEl.innerHTML =
+      '<div class="panel"><button id="shopclose">×</button>' +
+      '<h2 id="shoptitle">ショップ</h2>' +
+      '<div class="hint" id="shophint"></div>' +
+      '<div class="grid" id="shopgrid"></div></div>';
+    document.body.appendChild(shopPanelEl);
+    const shopGridEl = shopPanelEl.querySelector('#shopgrid');
+    shopPanelEl.querySelector('#shopclose').addEventListener('click', () => closeShop(true));
+    shopPanelEl.addEventListener('click', (e) => { if (e.target === shopPanelEl) closeShop(true); });
+
+    function shopItemOwned(it) { return it.kind === 'tool' ? !!ownedTools[it.id] : !!ownedArmor[it.id]; }
+    function shopItemDef(it) { return it.kind === 'tool' ? toolById[it.id] : ARMOR_DEFS.find((a) => a.id === it.id); }
+    function buyShopItem(it) {
+      if (shopItemOwned(it)) return;
+      if ((materials.emerald || 0) < it.cost) { showToast('エメラルドが足りない（村人に素材を売って入手）'); return; }
+      materials.emerald -= it.cost;
+      const def = shopItemDef(it);
+      if (it.kind === 'tool') {
+        ownedTools[it.id] = true;
+        updateHotbar();
+        const idx = hotbarItems.findIndex((h) => h.kind === 'tool' && h.id === it.id);  // 買った武器を即装備
+        if (idx >= 0) { selectedSlot = idx; updateBlockInfo(); refreshHotbarCounts(); }
+      } else {
+        ownedArmor[it.id] = true;
+        updateArmorHUD();
+        updateHotbar();
+      }
+      showToast(def.name + 'を購入して装備した！');
+      refreshShopPanel();
+    }
+    function refreshShopPanel() {
+      const stock = SHOP_STOCK[currentShopType] || [];
+      shopGridEl.innerHTML = '';
+      for (const it of stock) {
+        const def = shopItemDef(it);
+        const owned = shopItemOwned(it);
+        const affordable = (materials.emerald || 0) >= it.cost;
+        const card = document.createElement('div');
+        card.className = 'recipe' + (owned ? ' owned' : (affordable ? '' : ' locked'));
+        const img = document.createElement('img'); img.src = def.icon; img.alt = def.name;
+        const nm = document.createElement('div'); nm.className = 'rname';
+        nm.textContent = it.kind === 'armor' ? `${def.name}（-${Math.round(def.reduce * 100)}%）`
+                       : (def.type === 'bow' ? `${def.name}（遠距離）` : `${def.name}（攻撃+${def.attack}）`);
+        const cs = document.createElement('div'); cs.className = 'rcost';
+        cs.textContent = owned ? (it.kind === 'armor' ? '装備中' : '所持済み')
+                               : `エメラルド × ${it.cost}（所持 ${materials.emerald || 0}）`;
+        card.appendChild(img); card.appendChild(nm); card.appendChild(cs);
+        if (!owned) card.addEventListener('click', () => buyShopItem(it));
+        shopGridEl.appendChild(card);
+      }
+    }
+    function openShop(type) {
+      if (anyUIOpen()) return;
+      currentShopType = type;
+      shopOpen = true;
+      shopPanelEl.querySelector('#shoptitle').textContent = SHOP_TITLES[type] || 'ショップ';
+      shopPanelEl.querySelector('#shophint').textContent = SHOP_HINTS[type] || '';
+      refreshShopPanel();
+      shopPanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      mouseDown = false; primaryHeld = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeShop(relock) {
+      if (!shopOpen) return;
+      shopOpen = false;
+      shopPanelEl.style.display = 'none';
       if (usingFallback) {
         document.body.style.cursor = 'none';
       } else if (relock) {
@@ -2024,6 +2126,8 @@
     const villageTorches = [];     // {x,y,z} 初期化時に placeTorch する灯り
     const villagerSpawns = [];     // {x,z} 村人をスポーンさせる位置
     const villageCrops = [];       // {x,z} 畑に植える小麦の位置 (初期化時に plantCrop)
+    const shopCounters = new Map();  // "x,y,z" → 'weapon'|'armor' (右クリックでショップを開くカウンター)
+    const shopSigns = [];          // {x,y,z,text} 店の上空に出す浮遊看板
     function vSet(x, y, z, t) {
       const ck = x + ',' + z;
       let arr = villageColumns.get(ck);
@@ -2110,6 +2214,22 @@
       vSet(sm.x0 + 2, FY + 1, sm.z1 - 1, FURNACE_INDEX);
       vSet(sm.x1 - 1, FY + 1, sm.z0 + 1, CHEST_INDEX);
       vSet(sm.mx, FY + 1, sm.mz, OBSIDIAN_INDEX);
+
+      // 武器屋 (西): 石壁・ドアは東(プラザ向き)。中にカウンター(黒曜石)。看板「武器屋」
+      const ws = buildBuilding(76, 90, 8, 6, 2, 4, 'E', 4);
+      const wcx = ws.x1 - 1, wcz = ws.mz;                 // ドア内側のカウンター位置
+      vSet(wcx, FY + 1, wcz, OBSIDIAN_INDEX);
+      vSet(ws.x0 + 1, FY + 1, ws.z0 + 1, CHEST_INDEX);    // 飾りのチェスト
+      shopCounters.set(wcx + ',' + (FY + 1) + ',' + wcz, 'weapon');
+      shopSigns.push({ x: ws.mx, y: ws.top + 3, z: ws.mz, text: '武器屋' });
+
+      // 防具屋 (東): 石壁・ドアは西(プラザ向き)。中にカウンター(黒曜石)。看板「防具屋」
+      const as = buildBuilding(107, 90, 8, 6, 2, 4, 'W', 4);
+      const acx = as.x0 + 1, acz = as.mz;
+      vSet(acx, FY + 1, acz, OBSIDIAN_INDEX);
+      vSet(as.x1 - 1, FY + 1, as.z0 + 1, CHEST_INDEX);
+      shopCounters.set(acx + ',' + (FY + 1) + ',' + acz, 'armor');
+      shopSigns.push({ x: as.mx, y: as.top + 3, z: as.mz, text: '防具屋' });
 
       // 民家2軒 + 井戸
       buildVillageHouse(100, 86, 6, 6, 7, 4, 'S');
@@ -3113,6 +3233,7 @@
       if (furnaceOpen) { if (e.code === 'Escape') closeFurnace(false); else if (e.code === 'KeyE') closeFurnace(true); return; }
       if (chestOpen) { if (e.code === 'Escape') closeChest(false); else if (e.code === 'KeyE') closeChest(true); return; }
       if (tradeOpen) { if (e.code === 'Escape') closeTrade(false); else if (e.code === 'KeyE') closeTrade(true); return; }
+      if (shopOpen) { if (e.code === 'Escape') closeShop(false); else if (e.code === 'KeyE') closeShop(true); return; }
       if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
       if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
@@ -3408,6 +3529,8 @@
         mineStrikeCount = 0;
         startHandSwing();
       } else if (e.button === 2) {
+        // 武器屋/防具屋のカウンターを右クリック → ショップを開く
+        if (shopCounters.has(info.posKey)) { openShop(shopCounters.get(info.posKey)); return; }
         // かまどを右クリック → 精錬メニューを開く (本家準拠の対話)
         if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }
         // ベッドを右クリック → 就寝 (夜スキップ + リスポーン設定)
@@ -3599,6 +3722,27 @@
           placeTorch(x, y, z, t.n ? { x: t.n.x, y: 0, z: t.n.z } : null, true);
         }
       } catch (err) { /* 壊れたデータは無視 */ }
+    })();
+
+    // 店の浮遊看板 (武器屋/防具屋) を上空に設置 — 場所が分かるようにする
+    (function placeShopSigns() {
+      for (const s of shopSigns) {
+        const cv = document.createElement('canvas');
+        cv.width = 256; cv.height = 96;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = 'rgba(40,28,16,0.82)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(6, 6, 244, 84, 14); else ctx.rect(6, 6, 244, 84);
+        ctx.fill();
+        ctx.lineWidth = 4; ctx.strokeStyle = '#e8c178'; ctx.stroke();
+        ctx.font = 'bold 52px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#ffe9b0'; ctx.fillText(s.text, 128, 50);
+        const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter;
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true }));
+        sp.scale.set(3.0, 1.12, 1);
+        sp.position.set(s.x, s.y, s.z);
+        scene.add(sp);
+      }
     })();
 
     // 村の灯り (街灯・室内の松明) を設置。プレイヤーのセーブには残さない(skipSave)
