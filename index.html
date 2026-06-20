@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14l ・ 草原バイオーム(緑の草地+花/草)を実装</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14m ・ 山の上で縦揺れする不具合を修正</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2885,7 +2885,9 @@
       const px = Math.round(x);
       const pz = Math.round(z);
       const maxReach = refY - PLAYER_EYE + STEP_HEIGHT + 0.05;  // 足元 + ステップ高
-      for (let y = 20; y >= BEDROCK_Y; y--) {
+      // プレイヤーの頭上から下方へ走査 (山など高い地形でも地表を床として拾う。
+      // 固定値 20 始まりだと y20 より高い山の上で床を見失い縦揺れする不具合があった)
+      for (let y = Math.ceil(refY) + 1; y >= BEDROCK_Y; y--) {
         if (isSolidAt(px, y, pz)) {
           const blockTop = y + 0.5;
           if (blockTop <= maxReach) return blockTop + PLAYER_EYE;
@@ -3753,13 +3755,13 @@
       const px = Math.round(x);
       const pz = Math.round(z);
       if (fromY !== undefined) {
-        const startY = Math.min(40, Math.floor(fromY));
+        const startY = Math.min(70, Math.floor(fromY));  // 山(~y55)も拾えるよう上限を引き上げ
         for (let y = startY; y >= BEDROCK_Y; y--) {
           if (isSolidAt(px, y, pz) && !isSolidAt(px, y + 1, pz)) return y + 0.5;  // 上が空いた床のみ
         }
         return null;
       }
-      for (let y = 20; y >= BEDROCK_Y; y--) {
+      for (let y = 70; y >= BEDROCK_Y; y--) {  // 既定は最上面 (山の地表 y~55 まで届くよう 20→70)
         if (isSolidAt(px, y, pz)) return y + 0.5;
       }
       return null;
