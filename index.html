@@ -308,7 +308,7 @@
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
     1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14h ・ 座標(99,-13)に雪山を追加</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14i ・ ダンジョンのTNT跡もリロードで復元</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2143,13 +2143,15 @@
         else t = STONE_INDEX;                               // 石 (壁・天井・床)
         if (addBlock(cx, y, cz, t)) keys.push(key(cx, y, cz));
       }
-      // プレイヤーの改変 (掘った/置いた) を反映 (洞窟は採掘可)
+      // プレイヤーの改変を反映。村と同じく破壊(クレーター)は復元 = 無視し、設置だけ残す。
+      // TNT/採掘でダンジョンが壊れてもリロードで元の構造に戻る。
       const e = edits.get(colKey(cx, cz));
       if (e) {
         for (const [bk, val] of e) {
+          if (val < 0) continue;  // 破壊は無視 → 構造を復元
           const [bx, by, bz] = bk.split(',').map(Number);
           removeBlock(bx, by, bz);
-          if (val >= 0 && addBlock(bx, by, bz, val)) keys.push(bk);
+          if (addBlock(bx, by, bz, val)) keys.push(bk);
         }
       }
     }
