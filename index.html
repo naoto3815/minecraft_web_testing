@@ -323,7 +323,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14p ・ 水のヒビ除去 / 攻撃ヒット演出 / トトがペット化(追従・吠える)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14q ・ 何もない所でも左クリックで腕を振れるように(空振り対応)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -3253,7 +3253,11 @@
       if (th && (!hit || th.distance < hit.distance)) { hit = th; hitType = 'torch'; }
       if (crh && (!hit || crh.distance < hit.distance)) { hit = crh; hitType = 'crop'; }
       if (sph && (!hit || sph.distance < hit.distance)) { hit = sph; hitType = 'sapling'; }
-      if (!hit || hit.distance > 8) return;
+      if (!hit || hit.distance > 8) {
+        // 照準が何にも当たっていない: 左クリックは空振りとして腕を振る (本家同様)
+        if (e.button === 0) startHandSwing();
+        return;
+      }
       if (e.button === 0 && hitType !== 'block' && hitType !== 'torch' && hitType !== 'crop' && hitType !== 'sapling') addExhaustion(EXHAUST_ATTACK);  // 攻撃で満腹度を消耗 (本家準拠)
 
       // 松明: 左クリックで即撤去 (本家同様アイテムとして戻る)
