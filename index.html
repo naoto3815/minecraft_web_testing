@@ -325,7 +325,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14v ・ 全Mobの当たり判定を半径考慮に修正(壁へのめり込みを解消)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14w ・ 店にチェスト/剣・盾ロゴ看板/カウンター奥の店員(右クリックで会話)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -2131,7 +2131,8 @@
     const villagerSpawns = [];     // {x,z} 村人をスポーンさせる位置
     const villageCrops = [];       // {x,z} 畑に植える小麦の位置 (初期化時に plantCrop)
     const shopCounters = new Map();  // "x,y,z" → 'weapon'|'armor' (右クリックでショップを開くカウンター)
-    const shopSigns = [];          // {x,y,z,text} 店の上空に出す浮遊看板
+    const shopSigns = [];          // {x,y,z,type} 店の上空に出す浮遊看板(ロゴ)
+    const shopkeeperSpawns = [];   // {x,z,shopType,face} カウンター奥に立つ店員村人
     function vSet(x, y, z, t) {
       const ck = x + ',' + z;
       let arr = villageColumns.get(ck);
@@ -2225,7 +2226,8 @@
       vSet(wcx, FY + 1, wcz, OBSIDIAN_INDEX);
       vSet(ws.x0 + 1, FY + 1, ws.z0 + 1, CHEST_INDEX);    // 飾りのチェスト
       shopCounters.set(wcx + ',' + (FY + 1) + ',' + wcz, 'weapon');
-      shopSigns.push({ x: ws.mx, y: ws.top + 3, z: ws.mz, text: '武器屋' });
+      shopSigns.push({ x: ws.mx, y: ws.top + 3, z: ws.mz, type: 'weapon' });
+      shopkeeperSpawns.push({ x: wcx - 1, z: wcz, shopType: 'weapon', face: Math.PI / 2 });  // カウンター奥(西)に店員
 
       // 防具屋 (東): 石壁・ドアは西(プラザ向き)。中にカウンター(黒曜石)。看板「防具屋」
       const as = buildBuilding(107, 90, 8, 6, 2, 4, 'W', 4);
@@ -2233,7 +2235,8 @@
       vSet(acx, FY + 1, acz, OBSIDIAN_INDEX);
       vSet(as.x1 - 1, FY + 1, as.z0 + 1, CHEST_INDEX);
       shopCounters.set(acx + ',' + (FY + 1) + ',' + acz, 'armor');
-      shopSigns.push({ x: as.mx, y: as.top + 3, z: as.mz, text: '防具屋' });
+      shopSigns.push({ x: as.mx, y: as.top + 3, z: as.mz, type: 'armor' });
+      shopkeeperSpawns.push({ x: acx + 1, z: acz, shopType: 'armor', face: -Math.PI / 2 });  // カウンター奥(東)に店員
 
       // 民家2軒 + 井戸
       buildVillageHouse(100, 86, 6, 6, 7, 4, 'S');
@@ -3571,7 +3574,10 @@
             hitPassiveMob(g, attackDamage());
             startHandSwing();
           } else if (e.button === 2) {
-            if (g.userData.def.key === 'villager') openTrade();   // 村人 → 取引メニュー
+            if (g.userData.shopType) {                 // 店員 → 挨拶して店を開く
+              showToast(g.userData.shopType === 'weapon' ? 'いらっしゃい！武器はいるかい？' : 'いらっしゃい！防具はどうだい？');
+              openShop(g.userData.shopType);
+            } else if (g.userData.def.key === 'villager') openTrade();   // 村人 → 取引メニュー
             else feedPassiveMob(g);   // 動物に小麦/種 → ラブモード (繁殖)
           }
         }
@@ -3782,22 +3788,49 @@
       } catch (err) { /* 壊れたデータは無視 */ }
     })();
 
-    // 店の浮遊看板 (武器屋/防具屋) を上空に設置 — 場所が分かるようにする
+    // 店の浮遊看板 — 文字ではなく武器(剣)/防具(盾)のロゴで店の種類を示す
     (function placeShopSigns() {
+      // 剣ロゴ (武器屋)
+      function drawSword(ctx, cx, cy) {
+        ctx.save(); ctx.translate(cx, cy);
+        ctx.fillStyle = '#e3e8ee';                          // 刀身
+        ctx.beginPath(); ctx.moveTo(-9, -46); ctx.lineTo(0, -58); ctx.lineTo(9, -46);
+        ctx.lineTo(7, 18); ctx.lineTo(-7, 18); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = '#9aa3ad'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#caa24a';                          // 鍔
+        ctx.fillRect(-30, 18, 60, 12);
+        ctx.fillStyle = '#6b4a2b';                          // 柄
+        ctx.fillRect(-8, 30, 16, 34);
+        ctx.fillStyle = '#caa24a'; ctx.beginPath(); ctx.arc(0, 66, 8, 0, Math.PI * 2); ctx.fill();  // 柄頭
+        ctx.restore();
+      }
+      // 盾ロゴ (防具屋)
+      function drawShield(ctx, cx, cy) {
+        ctx.save(); ctx.translate(cx, cy);
+        ctx.beginPath();
+        ctx.moveTo(-40, -52); ctx.lineTo(40, -52);
+        ctx.lineTo(40, 6); ctx.quadraticCurveTo(40, 50, 0, 66);
+        ctx.quadraticCurveTo(-40, 50, -40, 6); ctx.closePath();
+        ctx.fillStyle = '#c4ccd4'; ctx.fill();
+        ctx.lineWidth = 5; ctx.strokeStyle = '#7c8893'; ctx.stroke();
+        ctx.fillStyle = '#b23b3b';                          // 紋章(十字)
+        ctx.fillRect(-7, -40, 14, 92);
+        ctx.fillRect(-30, -10, 60, 14);
+        ctx.restore();
+      }
       for (const s of shopSigns) {
         const cv = document.createElement('canvas');
-        cv.width = 256; cv.height = 96;
+        cv.width = 192; cv.height = 192;
         const ctx = cv.getContext('2d');
-        ctx.fillStyle = 'rgba(40,28,16,0.82)';
+        ctx.fillStyle = 'rgba(38,26,15,0.85)';             // 木札の背景
         ctx.beginPath();
-        if (ctx.roundRect) ctx.roundRect(6, 6, 244, 84, 14); else ctx.rect(6, 6, 244, 84);
+        if (ctx.roundRect) ctx.roundRect(10, 10, 172, 172, 22); else ctx.rect(10, 10, 172, 172);
         ctx.fill();
-        ctx.lineWidth = 4; ctx.strokeStyle = '#e8c178'; ctx.stroke();
-        ctx.font = 'bold 52px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#ffe9b0'; ctx.fillText(s.text, 128, 50);
+        ctx.lineWidth = 6; ctx.strokeStyle = '#e8c178'; ctx.stroke();
+        if (s.type === 'weapon') drawSword(ctx, 96, 96); else drawShield(ctx, 96, 100);
         const tex = new THREE.CanvasTexture(cv); tex.minFilter = THREE.LinearFilter;
         const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true }));
-        sp.scale.set(3.0, 1.12, 1);
+        sp.scale.set(1.7, 1.7, 1);
         sp.position.set(s.x, s.y, s.z);
         scene.add(sp);
       }
@@ -6520,6 +6553,7 @@
       group.rotation.y = group.userData.heading + def.facing;
       scene.add(group);
       passiveMobs.push(group);
+      return group;
     }
 
     function killPassiveMob(group, drop) {
@@ -6782,6 +6816,7 @@
       const D2 = PMOB_DESPAWN_DIST * PMOB_DESPAWN_DIST;
       for (let i = passiveMobs.length - 1; i >= 0; i--) {
         const m = passiveMobs[i];
+        if (m.userData.stationary) continue;   // 店員はデスポーンさせない (店番を続ける)
         const dx = camera.position.x - m.position.x;
         const dz = camera.position.z - m.position.z;
         if (dx * dx + dz * dz > D2) killPassiveMob(m);
@@ -6822,6 +6857,14 @@
         }
         // トトの吠えタイマー減衰 (吠えアニメに使用)
         if (ud.barkTimer > 0) ud.barkTimer = Math.max(0, ud.barkTimer - dt);
+
+        // 店員(村人): その場に固定して店番。近くのプレイヤーの方を向くだけで移動しない
+        if (ud.stationary) {
+          const sdx = camera.position.x - m.position.x, sdz = camera.position.z - m.position.z;
+          if (sdx * sdx + sdz * sdz < 64) m.rotation.y = Math.atan2(sdx, sdz) + def.facing;  // 近ければ振り向く
+          else m.rotation.y = (ud.heading || 0) + def.facing;
+          continue;
+        }
 
         // 子供の成長: 時間経過で大人サイズへ (本家準拠)
         if (ud.babyT !== undefined && ud.babyT < BABY_GROW_TIME) {
@@ -7126,6 +7169,16 @@
           // 村人は村の広場周辺に配置 (それ以外の通常スポーンより優先)
           if (def.key === 'villager') {
             for (const s of villagerSpawns) spawnPassiveMob(def, s.x, s.z);
+            // 武器屋・防具屋の店員: カウンター奥に固定で立たせ、右クリックで店を開く
+            for (const s of shopkeeperSpawns) {
+              const keeper = spawnPassiveMob(def, s.x, s.z, VILLAGE_Y);
+              if (keeper) {
+                keeper.userData.shopType = s.shopType;
+                keeper.userData.stationary = true;       // 動かず店番をする
+                keeper.userData.heading = s.face;
+                keeper.rotation.y = s.face + def.facing;
+              }
+            }
           }
           // 初期スポーン (目標数まで周囲に補充)。洞窟専用Mob(スライム系)は地表に湧かせない
           if (!def.cave) {
