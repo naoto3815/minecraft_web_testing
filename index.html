@@ -325,7 +325,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14u ・ スマホの操作ボタン配置を最適化(採掘を最大・主要3ボタンを親指圏に)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14v ・ 全Mobの当たり判定を半径考慮に修正(壁へのめり込みを解消)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -4087,6 +4087,18 @@
       return null;
     }
 
+    // Mob の体(半径 radius)が進行方向の壁にめり込むのを防ぐ。中心ではなく体の前縁で壁を判定する。
+    // 段差(stepH 以内)は登れる壁ではないので false。登れない壁/床なしなら true。
+    function mobWallAhead(fromX, fromZ, toX, toZ, ref, radius, stepH) {
+      const r = radius || 0.35;
+      const ddx = toX - fromX, ddz = toZ - fromZ;
+      const ex = toX + (ddx > 0 ? r : ddx < 0 ? -r : 0);   // 進行方向の体の前縁
+      const ez = toZ + (ddz > 0 ? r : ddz < 0 ? -r : 0);
+      if (ex === toX && ez === toZ) return false;            // 移動していない
+      const fy = creeperGroundY(ex, ez, ref + stepH);
+      return fy === null || fy - ref > stepH;                // 前縁の先が登れない壁なら true
+    }
+
     // ===== Mob 共通: 環境ダメージ/危険地形の判定 =====
     // 足元 footY・高さ height の胴体セルに溶岩が重なっているか? (全Mob共通の溶岩判定)
     function posTouchingLava(x, footY, z, height) {
@@ -4849,6 +4861,7 @@
         if (newY === null) continue;
         if (newY - ud.groundY > WARDEN_STEP_HEIGHT) continue;  // 論理接地高さで段差判定
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;  // 深い水は避ける (溺れ防止)
+        if (mobWallAhead(w.position.x, w.position.z, newX, newZ, ud.groundY, WARDEN_RADIUS, WARDEN_STEP_HEIGHT)) continue;  // 壁にめり込まない
         w.position.x = newX;
         w.position.z = newZ;
         setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);  // 実Yは stepMobGroupY が追従
@@ -5328,6 +5341,7 @@
         if (newY === null) continue;
         if (newY - ud.groundY > ZOMBIE_STEP_HEIGHT) continue;
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        if (mobWallAhead(zm.position.x, zm.position.z, newX, newZ, ud.groundY, ZOMBIE_WIDTH / 2, ZOMBIE_STEP_HEIGHT)) continue;
         zm.position.x = newX; zm.position.z = newZ;
         setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
       }
@@ -5584,6 +5598,7 @@
         if (newY === null) continue;
         if (newY - ud.groundY > SK_STEP_HEIGHT) continue;
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        if (mobWallAhead(sk.position.x, sk.position.z, newX, newZ, ud.groundY, SK_WIDTH / 2, SK_STEP_HEIGHT)) continue;
         sk.position.x = newX; sk.position.z = newZ;
         setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
       }
@@ -5849,6 +5864,7 @@
         if (newY === null) continue;
         if (newY - ud.groundY > ZOMBIE_STEP_HEIGHT) continue;
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;
+        if (mobWallAhead(sk.position.x, sk.position.z, newX, newZ, ud.groundY, SKELETON_WIDTH / 2, ZOMBIE_STEP_HEIGHT)) continue;
         sk.position.x = newX; sk.position.z = newZ;
         setMobGroundTarget(ud, newY, MOB_STEP_HOP_DUR);
       }
@@ -6035,7 +6051,8 @@
         const newX = g.position.x + dirX * GOLEM_SPEED * dt;
         const newZ = g.position.z + dirZ * GOLEM_SPEED * dt;
         const newY = creeperGroundY(newX, newZ);
-        if (newY === null || newY - ud.groundY > GOLEM_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
+        if (newY === null || newY - ud.groundY > GOLEM_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER
+            || mobWallAhead(g.position.x, g.position.z, newX, newZ, ud.groundY, GOLEM_WIDTH / 2, GOLEM_STEP_HEIGHT)) {
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
           continue;
         }
@@ -6393,6 +6410,7 @@
         if (newY === null) continue;
         if (newY - c.userData.groundY > CREEPER_STEP_HEIGHT) continue;  // 論理接地高さで段差判定
         if (waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) continue;  // 深い水は避ける (溺れ防止)
+        if (mobWallAhead(c.position.x, c.position.z, newX, newZ, c.userData.groundY, CREEPER_RADIUS, CREEPER_STEP_HEIGHT)) continue;  // 壁にめり込まない
         c.position.x = newX;
         c.position.z = newZ;
         setMobGroundTarget(c.userData, newY, MOB_STEP_HOP_DUR);  // 実Yは stepMobGroupY が追従
@@ -6906,7 +6924,8 @@
             const anz = m.position.z + adirZ * aspeed * dt;
             const any = creeperGroundY(anx, anz);
             const aref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
-            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER) {
+            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER
+                || mobWallAhead(m.position.x, m.position.z, anx, anz, aref, def.radius, PMOB_STEP_HEIGHT)) {
               ud.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI * 0.4;
               continue;
             }
@@ -6944,7 +6963,8 @@
             const anz = m.position.z + adirZ * aspeed * dt;
             const any = creeperGroundY(anx, anz);
             const aref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
-            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER) {
+            if (any === null || any - aref > PMOB_STEP_HEIGHT || waterDepthAt(anx, anz) >= MOB_DEEP_WATER
+                || mobWallAhead(m.position.x, m.position.z, anx, anz, aref, def.radius, PMOB_STEP_HEIGHT)) {
               // 進めない: 少し回り込む
               ud.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI * 0.4;
               continue;
@@ -6990,7 +7010,8 @@
               const lnz = m.position.z + ldirZ * def.speed * dt;
               const lny = creeperGroundY(lnx, lnz);
               const lref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
-              if (lny !== null && lny - lref <= PMOB_STEP_HEIGHT && waterDepthAt(lnx, lnz) < MOB_DEEP_WATER) {
+              if (lny !== null && lny - lref <= PMOB_STEP_HEIGHT && waterDepthAt(lnx, lnz) < MOB_DEEP_WATER
+                  && !mobWallAhead(m.position.x, m.position.z, lnx, lnz, lref, def.radius, PMOB_STEP_HEIGHT)) {
                 m.position.x = lnx;
                 m.position.z = lnz;
                 setMobGroundTarget(ud, lny, def.hop ? SLIME_STEP_HOP_DUR : MOB_STEP_HOP_DUR);
@@ -7025,7 +7046,8 @@
             const nz = m.position.z + dirZ * pspeed * dt;
             const gref = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
             const ny = creeperGroundY(nx, nz, gref + PMOB_STEP_HEIGHT);
-            if (ny !== null && ny - gref <= PMOB_STEP_HEIGHT && waterDepthAt(nx, nz) < MOB_DEEP_WATER) {
+            if (ny !== null && ny - gref <= PMOB_STEP_HEIGHT && waterDepthAt(nx, nz) < MOB_DEEP_WATER
+                && !mobWallAhead(m.position.x, m.position.z, nx, nz, gref, def.radius, PMOB_STEP_HEIGHT)) {
               m.position.x = nx; m.position.z = nz;
               setMobGroundTarget(ud, ny, MOB_STEP_HOP_DUR);
               m.rotation.y = Math.atan2(dirX, dirZ) + def.facing;
@@ -7069,7 +7091,8 @@
         // ホップMobはイージング中の実Yではなく論理接地高さ(groundY)で段差を判定する
         const groundRef = (ud.groundY !== undefined) ? ud.groundY : m.position.y;
         const newY = creeperGroundY(newX, newZ, groundRef + PMOB_STEP_HEIGHT);
-        if (newY === null || newY - groundRef > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER) {
+        if (newY === null || newY - groundRef > PMOB_STEP_HEIGHT || waterDepthAt(newX, newZ) >= MOB_DEEP_WATER
+            || mobWallAhead(m.position.x, m.position.z, newX, newZ, groundRef, def.radius, PMOB_STEP_HEIGHT)) {
           // 壁/崖/深い水(溺れ防止): 向きを変える
           ud.heading += Math.PI * (0.5 + Math.random() * 0.5);
           continue;
