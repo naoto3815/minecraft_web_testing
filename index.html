@@ -286,12 +286,12 @@
     }
     #touch-buttons {
       position: absolute;
-      bottom: 28px; right: 20px;
-      flex-direction: column; align-items: flex-end; gap: 12px;
+      bottom: 22px; right: 18px;
+      flex-direction: row; align-items: flex-end; gap: 12px;
       z-index: 50; display: none;
     }
     body.touch #touch-buttons { display: flex; }
-    #touch-buttons .row { display: flex; gap: 12px; }
+    #touch-buttons .col { display: flex; flex-direction: column; align-items: center; gap: 11px; }
     #touch-buttons button {
       background: rgba(255,255,255,0.22);
       border: 2px solid rgba(255,255,255,0.55);
@@ -301,11 +301,13 @@
       -webkit-tap-highlight-color: transparent;
       user-select: none; touch-action: manipulation;
       display: flex; align-items: center; justify-content: center;
-      line-height: 1;
+      line-height: 1.05; text-align: center;
     }
-    #touch-buttons button.primary { width: 82px; height: 82px; font-size: 17px; }
-    #touch-buttons button.small { width: 58px; height: 58px; font-size: 14px; }
-    #touch-buttons button:active { background: rgba(255,255,255,0.45); }
+    /* 採掘=最大(親指の定位置) / ジャンプ・設置=主要 / 飛行・下降=補助 */
+    #touch-buttons button.big     { width: 92px; height: 92px; font-size: 17px; }
+    #touch-buttons button.primary { width: 76px; height: 76px; font-size: 15px; }
+    #touch-buttons button.small   { width: 56px; height: 56px; font-size: 13px; }
+    #touch-buttons button:active { background: rgba(255,255,255,0.5); transform: scale(0.95); }
     #touch-fly.on { background: rgba(120,200,255,0.5); border-color: rgba(180,230,255,0.9); }
     body.touch #info { font-size: 11px; max-width: 64vw; }
     .touch-only { display: none; }
@@ -323,7 +325,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14t ・ 草原の草・花を本家風ドット絵に / 左クリックで採取できるように</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14u ・ スマホの操作ボタン配置を最適化(採掘を最大・主要3ボタンを親指圏に)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -354,14 +356,14 @@
   <!-- タッチデバイス専用UI (CSS で body.touch のみ表示) -->
   <div id="touch-joystick"><div id="touch-joystick-knob"></div></div>
   <div id="touch-buttons">
-    <div class="row">
+    <div class="col">
       <button id="touch-fly" class="small" type="button">飛行</button>
       <button id="touch-down" class="small" type="button">下降</button>
-      <button id="touch-jump" class="small" type="button">ジャンプ</button>
-    </div>
-    <div class="row">
       <button id="touch-use" class="primary" type="button">設置<br>使う</button>
-      <button id="touch-mine" class="primary" type="button">採掘<br>攻撃</button>
+    </div>
+    <div class="col">
+      <button id="touch-jump" class="primary" type="button">ジャンプ</button>
+      <button id="touch-mine" class="big" type="button">採掘<br>攻撃</button>
     </div>
   </div>
 
