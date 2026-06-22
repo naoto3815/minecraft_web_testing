@@ -336,6 +336,9 @@
     #invcursor { position: fixed; z-index: 120; width: 40px; height: 40px; pointer-events: none; transform: translate(-50%, -50%); display: none; }
     #invcursor img { width: 36px; height: 36px; image-rendering: pixelated; }
     #invcursor .count { position: absolute; right: 0; bottom: 0; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; }
+    /* スロットにカーソルを乗せた時の名称ツールチップ */
+    #invtip { position: fixed; z-index: 130; background: rgba(20,20,28,0.95); border: 1px solid #6a6a8a; color: #fff;
+      font-family: sans-serif; font-size: 13px; padding: 3px 9px; border-radius: 5px; pointer-events: none; display: none; white-space: nowrap; }
     /* 照準先の名称表示 (クロスヘアの上) */
     #lookname {
       position: fixed; left: 50%; top: 50%; transform: translate(-50%, -300%);
@@ -356,7 +359,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: 選択  /  クラフト/インベントリ: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14z ・ 照準を合わせた対象の名称を表示</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-15a ・ インベントリのスロットにカーソルで名称ツールチップ</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -1409,6 +1412,22 @@
     document.body.appendChild(cursorEl);
     addEventListener('mousemove', (e) => { if (invOpen) { cursorEl.style.left = e.clientX + 'px'; cursorEl.style.top = e.clientY + 'px'; } });
 
+    // スロットの名称ツールチップ (カーソルを乗せた枠の中身名を表示)
+    const invTipEl = document.createElement('div');
+    invTipEl.id = 'invtip';
+    document.body.appendChild(invTipEl);
+    invPanelEl.addEventListener('mousemove', (e) => {
+      const cell = e.target.closest && e.target.closest('.cell');
+      const key = cell && cell._itemKey;
+      if (key && !cursorStack) {   // アイテムを担いでいる間は出さない (本家準拠)
+        invTipEl.textContent = keyName(key);
+        invTipEl.style.left = (e.clientX + 14) + 'px';
+        invTipEl.style.top = (e.clientY + 16) + 'px';
+        invTipEl.style.display = 'block';
+      } else invTipEl.style.display = 'none';
+    });
+    invPanelEl.addEventListener('mouseleave', () => { invTipEl.style.display = 'none'; });
+
     const _mainCells = [], _hotCells = [], _craftUICells = [], _chestCells = [];
     function _makeCell(parent, onDown) {
       const d = document.createElement('div'); d.className = 'cell';
@@ -1420,6 +1439,7 @@
     function _paint(cell, slot) {
       if (slot) { cell.img.src = keyIcon(slot.key); cell.img.style.display = ''; cell.cnt.textContent = slot.count > 1 ? slot.count : ''; }
       else { cell.img.removeAttribute('src'); cell.img.style.display = 'none'; cell.cnt.textContent = ''; }
+      if (cell.el) cell.el._itemKey = slot ? slot.key : null;   // ツールチップ用
     }
     // 36枠とクラフトUIのセルを一度だけ生成
     (function buildInventoryCells() {
@@ -1449,6 +1469,7 @@
           if (used) _paint(_craftUICells[i], craftCells[i]);
         }
         _paint(invCraftOutEl._cell, craftOut ? { key: craftOut.out, count: craftOut.n } : null);
+        invCraftOutEl._itemKey = craftOut ? craftOut.out : null;   // 出力枠のツールチップ用
       }
       // カーソル表示
       if (cursorStack) { cursorEl.style.display = 'block'; cursorEl.querySelector('img').src = keyIcon(cursorStack.key); cursorEl.querySelector('.count').textContent = cursorStack.count > 1 ? cursorStack.count : ''; }
@@ -1550,6 +1571,7 @@
       invOpen = false;
       invPanelEl.style.display = 'none';
       cursorEl.style.display = 'none';
+      invTipEl.style.display = 'none';
       updateHotbar();
       if (usingFallback) { document.body.style.cursor = 'none'; }
       else if (relock) { controls.lock(); }
