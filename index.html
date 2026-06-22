@@ -329,7 +329,9 @@
     #invpanel .carrow { font-size: 22px; opacity: 0.7; }
     #invpanel .cell.out { width: 52px; height: 52px; background: #3a3a3a; }
     #invpanel .cell.out img { width: 44px; height: 44px; top: 2px; left: 2px; }
-    #invpanel .invmain, #invpanel .invhot { display: grid; grid-template-columns: repeat(9, 44px); gap: 4px; }
+    #invpanel .invmain, #invpanel .invhot, #invpanel .invchest { display: grid; grid-template-columns: repeat(9, 44px); gap: 4px; }
+    #invpanel .chestbox { margin-bottom: 12px; padding-bottom: 10px; border-bottom: 2px solid #6a6a6a; }
+    #invpanel .chestbox::before { content: 'チェスト'; display: block; font-size: 12px; opacity: 0.7; margin-bottom: 6px; }
     #invpanel .invhot { margin-top: 8px; padding-top: 8px; border-top: 1px solid #555; }
     #invcursor { position: fixed; z-index: 120; width: 40px; height: 40px; pointer-events: none; transform: translate(-50%, -50%); display: none; }
     #invcursor img { width: 36px; height: 36px; image-rendering: pixelated; }
@@ -347,7 +349,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: 選択  /  クラフト/インベントリ: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14x ・ 本格クラフト＋フルインベントリ(36枠)＋スタック上限(64)＋作業台/3×3</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14y ・ チェストをスロット式UIに統合(持ち物と並べてドラッグ移動)</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -573,6 +575,7 @@
     // 全アイテムを文字列キーで扱う: ブロック='b:<index>' / 素材='m:<id>' / 道具='t:<id>' / 'tnt'
     // (防具は装備扱いで invSlots には入れない)
     const INV_HOTBAR = 9, INV_MAIN = 27, INV_SIZE = INV_HOTBAR + INV_MAIN;  // 0..8=ホットバー, 9..35=メイン
+    const CHEST_SLOTS = 27;          // チェストのスロット数 (インベントリ節より前に必要)
     const invSlots = new Array(INV_SIZE).fill(null);   // 各要素: null | { key, count }
     function stackMax(key) {
       if (key === 'tnt') return 64;
@@ -583,6 +586,19 @@
       let n = 0;
       for (const s of invSlots) if (s && s.key === key) n += s.count;
       return n;
+    }
+    // 任意のスロット配列(arr)へ key を n個追加 (既存スタック→空き)。余りを返す。チェスト等に使う
+    function addToSlots(arr, key, n) {
+      const max = stackMax(key);
+      for (const s of arr) { if (n <= 0) break; if (s && s.key === key && s.count < max) { const a = Math.min(max - s.count, n); s.count += a; n -= a; } }
+      for (let i = 0; i < arr.length && n > 0; i++) { if (!arr[i]) { const a = Math.min(max, n); arr[i] = { key, count: a }; n -= a; } }
+      return n;
+    }
+    // fromArr[idx] のスタックを toArr へ素早く移動 (Shift+クリック用)
+    function quickTransfer(fromArr, idx, toArr) {
+      const slot = fromArr[idx]; if (!slot) return;
+      const left = addToSlots(toArr, slot.key, slot.count);
+      if (left <= 0) fromArr[idx] = null; else slot.count = left;
     }
     // n個追加。詰め切れなかった残り(overflow)を返す
     function addItem(key, n) {
@@ -1346,22 +1362,29 @@
 
     // ===== インベントリ/クラフト画面 (36枠 + N×Nクラフトグリッド) =====
     // invOpen は updateHotbar/anyUIOpen から早期参照されるためインベントリ節の冒頭で宣言済み
+    let invMode = 'craft';            // 'craft'(インベントリ/作業台) | 'chest'(チェスト)
     let invGridN = 2;                 // 現在のクラフトグリッド辺 (2=インベントリ内, 3=作業台)
     let cursorStack = null;           // カーソルに持っているスタック {key,count}
     let craftCells = [];              // クラフト入力スロット (長さ n*n, key|null の {key,count})
     let craftOut = null;              // 出力 {out,n} | null
+    let chestSlots = null;            // 開いているチェストのスロット配列 (chest モード時)
+    let chestModeKey = null;          // 開いているチェストの "x,y,z"
 
     const invPanelEl = document.createElement('div');
     invPanelEl.id = 'invpanel';
     invPanelEl.innerHTML =
       '<div class="panel"><button id="invclose">×</button><h2 id="invtitle">インベントリ</h2>' +
       '<button id="invtocraft" style="position:absolute;top:10px;right:48px;height:30px;padding:0 12px;border:none;border-radius:6px;background:#4a6;color:#fff;font-size:13px;cursor:pointer;">簡易作成</button>' +
-      '<div class="hint">クリックで持つ/置く・右クリックで1個ずつ・Shift+クリックで素早く移動。クラフト枠に材料を本家のレシピ通りに並べると右に完成品が出る。</div>' +
-      '<div class="craftrow"><div class="cgrid" id="invcraftgrid"></div><div class="carrow">▶</div><div class="cell out" id="invcraftout"></div></div>' +
+      '<div class="hint" id="invhint">クリックで持つ/置く・右クリックで1個ずつ・Shift+クリックで素早く移動。クラフト枠に材料を本家のレシピ通りに並べると右に完成品が出る。</div>' +
+      '<div class="craftrow" id="invcraftrow"><div class="cgrid" id="invcraftgrid"></div><div class="carrow">▶</div><div class="cell out" id="invcraftout"></div></div>' +
+      '<div class="chestbox" id="invchestbox"><div class="invchest" id="invchest"></div></div>' +
       '<div class="invmain" id="invmain"></div><div class="invhot" id="invhot"></div></div>';
     document.body.appendChild(invPanelEl);
     const invMainEl = invPanelEl.querySelector('#invmain');
     const invHotEl = invPanelEl.querySelector('#invhot');
+    const invChestEl = invPanelEl.querySelector('#invchest');
+    const invChestBoxEl = invPanelEl.querySelector('#invchestbox');
+    const invCraftRowEl = invPanelEl.querySelector('#invcraftrow');
     const invCraftGridEl = invPanelEl.querySelector('#invcraftgrid');
     const invCraftOutEl = invPanelEl.querySelector('#invcraftout');
     invPanelEl.querySelector('#invclose').addEventListener('click', () => closeInventory(true));
@@ -1379,7 +1402,7 @@
     document.body.appendChild(cursorEl);
     addEventListener('mousemove', (e) => { if (invOpen) { cursorEl.style.left = e.clientX + 'px'; cursorEl.style.top = e.clientY + 'px'; } });
 
-    const _mainCells = [], _hotCells = [], _craftUICells = [];
+    const _mainCells = [], _hotCells = [], _craftUICells = [], _chestCells = [];
     function _makeCell(parent, onDown) {
       const d = document.createElement('div'); d.className = 'cell';
       const img = document.createElement('img'); const cnt = document.createElement('span'); cnt.className = 'count';
@@ -1396,6 +1419,7 @@
       for (let i = 0; i < INV_MAIN; i++) { const idx = INV_HOTBAR + i; _mainCells.push(_makeCell(invMainEl, (e) => clickInvSlot(idx, e))); }
       for (let i = 0; i < INV_HOTBAR; i++) { _hotCells.push(_makeCell(invHotEl, (e) => clickInvSlot(i, e))); }
       for (let i = 0; i < 9; i++) { _craftUICells.push(_makeCell(invCraftGridEl, (e) => clickCraftSlot(i, e))); }
+      for (let i = 0; i < CHEST_SLOTS; i++) { _chestCells.push(_makeCell(invChestEl, (e) => clickChestSlot(i, e))); }
       invCraftOutEl.innerHTML = '<img><span class="count"></span>';
       invCraftOutEl._cell = { img: invCraftOutEl.querySelector('img'), cnt: invCraftOutEl.querySelector('.count') };
       invCraftOutEl.addEventListener('mousedown', (e) => { e.preventDefault(); clickOutput(); });
@@ -1404,14 +1428,21 @@
     function renderInventory() {
       for (let i = 0; i < INV_MAIN; i++) _paint(_mainCells[i], invSlots[INV_HOTBAR + i]);
       for (let i = 0; i < INV_HOTBAR; i++) _paint(_hotCells[i], invSlots[i]);
-      const N = invGridN;
-      invCraftGridEl.style.gridTemplateColumns = `repeat(${N}, 44px)`;
-      for (let i = 0; i < 9; i++) {
-        const used = i < N * N;
-        _craftUICells[i].el.style.display = used ? '' : 'none';
-        if (used) _paint(_craftUICells[i], craftCells[i]);
+      invCraftRowEl.style.display = invMode === 'chest' ? 'none' : 'flex';
+      invChestBoxEl.style.display = invMode === 'chest' ? 'block' : 'none';
+      invPanelEl.querySelector('#invtocraft').style.display = invMode === 'chest' ? 'none' : '';   // チェスト中は簡易作成を隠す
+      if (invMode === 'chest') {
+        for (let i = 0; i < CHEST_SLOTS; i++) _paint(_chestCells[i], chestSlots ? chestSlots[i] : null);
+      } else {
+        const N = invGridN;
+        invCraftGridEl.style.gridTemplateColumns = `repeat(${N}, 44px)`;
+        for (let i = 0; i < 9; i++) {
+          const used = i < N * N;
+          _craftUICells[i].el.style.display = used ? '' : 'none';
+          if (used) _paint(_craftUICells[i], craftCells[i]);
+        }
+        _paint(invCraftOutEl._cell, craftOut ? { key: craftOut.out, count: craftOut.n } : null);
       }
-      _paint(invCraftOutEl._cell, craftOut ? { key: craftOut.out, count: craftOut.n } : null);
       // カーソル表示
       if (cursorStack) { cursorEl.style.display = 'block'; cursorEl.querySelector('img').src = keyIcon(cursorStack.key); cursorEl.querySelector('.count').textContent = cursorStack.count > 1 ? cursorStack.count : ''; }
       else cursorEl.style.display = 'none';
@@ -1439,10 +1470,23 @@
     }
     function clickInvSlot(idx, e) {
       e.preventDefault();
-      if (e.shiftKey) { quickMoveInv(idx); renderInventory(); return; }
+      if (e.shiftKey) {
+        if (invMode === 'chest' && chestSlots) quickTransfer(invSlots, idx, chestSlots);   // 持ち物→チェスト
+        else quickMoveInv(idx);
+        saveChestIfOpen(); renderInventory(); return;
+      }
       _slotClick(invSlots, idx, e.button === 2);
       renderInventory();
     }
+    function clickChestSlot(i, e) {
+      e.preventDefault();
+      if (!chestSlots) return;
+      if (e.shiftKey && chestSlots[i]) { quickTransfer(chestSlots, i, invSlots); saveChestIfOpen(); renderInventory(); return; }   // チェスト→持ち物
+      _slotClick(chestSlots, i, e.button === 2);
+      saveChestIfOpen();
+      renderInventory();
+    }
+    function saveChestIfOpen() { if (chestModeKey) { chestData[chestModeKey].slots = chestSlots; saveChests(); } }
     function clickCraftSlot(i, e) {
       e.preventDefault();
       if (e.shiftKey && craftCells[i]) { addItem(craftCells[i].key, craftCells[i].count); craftCells[i] = null; recomputeCraft(); renderInventory(); return; }
@@ -1466,11 +1510,20 @@
       for (let i = lo; i < hi && slot.count > 0; i++) if (!invSlots[i]) { const a = Math.min(max, slot.count); invSlots[i] = { key: slot.key, count: a }; slot.count -= a; }
       if (slot.count <= 0) invSlots[idx] = null;
     }
-    function openInventory(gridN) {
+    // arg: 'chest'(chestKey指定) | 数値(2=インベントリ内2×2, 3=作業台)
+    function openInventory(arg, chestKey) {
       if (anyUIOpen()) return;
-      invGridN = gridN || 2; invOpen = true;
+      invOpen = true;
       craftCells = new Array(9).fill(null); craftOut = null;
-      invPanelEl.querySelector('#invtitle').textContent = gridN === 3 ? '作業台' : 'インベントリ';
+      if (arg === 'chest') {
+        invMode = 'chest'; chestModeKey = chestKey; chestSlots = ensureChestSlots(chestKey);
+        invPanelEl.querySelector('#invtitle').textContent = 'チェスト';
+        invPanelEl.querySelector('#invhint').textContent = '上=チェスト / 下=持ち物。クリックで持つ/置く・右クリックで1個ずつ・Shift+クリックで一括移動。';
+      } else {
+        invMode = 'craft'; chestModeKey = null; chestSlots = null; invGridN = arg || 2;
+        invPanelEl.querySelector('#invtitle').textContent = arg === 3 ? '作業台' : 'インベントリ';
+        invPanelEl.querySelector('#invhint').textContent = 'クリックで持つ/置く・右クリックで1個ずつ・Shift+クリックで素早く移動。クラフト枠に材料を本家のレシピ通りに並べると右に完成品が出る。';
+      }
       renderInventory();
       invPanelEl.style.display = 'flex';
       document.body.style.cursor = '';
@@ -1481,10 +1534,12 @@
     }
     function closeInventory(relock) {
       if (!invOpen) return;
-      // カーソルとクラフト枠の中身をインベントリへ戻す (溢れは捨てない=その場ドロップ相当だが簡易にaddItem)
+      // カーソルとクラフト枠の中身を持ち物へ戻す
       if (cursorStack) { addItem(cursorStack.key, cursorStack.count); cursorStack = null; }
       for (let i = 0; i < craftCells.length; i++) if (craftCells[i]) { addItem(craftCells[i].key, craftCells[i].count); craftCells[i] = null; }
       craftOut = null;
+      saveChestIfOpen();
+      chestSlots = null; chestModeKey = null; invMode = 'craft';
       invOpen = false;
       invPanelEl.style.display = 'none';
       cursorEl.style.display = 'none';
@@ -1595,6 +1650,18 @@
     function chestAt(k) {
       if (!chestData[k]) chestData[k] = { blocks: {}, mats: {}, tnt: 0 };
       return chestData[k];
+    }
+    // チェストのスロット配列を返す。旧形式 {blocks,mats,tnt} は初回アクセスでスロットへ移行
+    function ensureChestSlots(k) {
+      const c = chestAt(k);
+      if (!c.slots) {
+        c.slots = new Array(CHEST_SLOTS).fill(null);
+        if (c.blocks) for (const i in c.blocks) addToSlots(c.slots, 'b:' + i, c.blocks[i]);
+        if (c.mats) for (const id in c.mats) addToSlots(c.slots, 'm:' + id, c.mats[id]);
+        if (c.tnt) addToSlots(c.slots, 'tnt', c.tnt);
+        delete c.blocks; delete c.mats; delete c.tnt;   // 旧形式は破棄 (slots が真の保管先)
+      }
+      return c.slots;
     }
 
     function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen || shopOpen || invOpen; }
@@ -3888,7 +3955,7 @@
         // ベッドを右クリック → 就寝 (夜スキップ + リスポーン設定)
         if (info.typeIndex === BED_INDEX) { trySleepInBed(info); return; }
         // チェストを右クリック → 保管メニュー
-        if (info.typeIndex === CHEST_INDEX) { openChest(info); return; }
+        if (info.typeIndex === CHEST_INDEX) { openInventory('chest', info.posKey); return; }   // スロット式チェスト
         // クワで草/土を右クリック → 耕地にする (本家準拠)
         const heldT = heldTool();
         if (heldT && heldT.type === 'hoe' && (info.typeIndex === GRASS_INDEX || info.typeIndex === DIRT_INDEX)) {
@@ -8306,12 +8373,11 @@
               // 上に作物が乗っていたら一緒に壊れる (種が落ちる)
               const cropAbove = crops.get(key(info.x, info.y + 1, info.z));
               if (cropAbove) removeCrop(cropAbove, true);
-              // チェストを壊したら中身はプレイヤーの持ち物へ戻る
+              // チェストを壊したら中身はプレイヤーの持ち物へ戻る (スロット式 + 旧形式の両対応)
               if (info.typeIndex === CHEST_INDEX && chestData[info.posKey]) {
                 const c = chestData[info.posKey];
-                for (const iStr in c.blocks) addItem('b:' + iStr, c.blocks[iStr]);
-                for (const id in c.mats) addItem('m:' + id, c.mats[id]);
-                addItem('tnt', c.tnt || 0);
+                const sl = ensureChestSlots(info.posKey);
+                for (const s of sl) if (s) addItem(s.key, s.count);
                 delete chestData[info.posKey];
                 saveChests();
               }
