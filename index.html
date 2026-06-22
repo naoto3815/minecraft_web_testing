@@ -313,6 +313,27 @@
     .touch-only { display: none; }
     body.touch .pc-only { display: none; }
     body.touch .touch-only { display: inline; }
+    /* ===== インベントリ/クラフト画面 ===== */
+    #invpanel { position: absolute; inset: 0; z-index: 110; display: none; background: rgba(0,0,0,0.72); align-items: center; justify-content: center; pointer-events: auto; }
+    #invpanel .panel { background: #2b2b2b; border: 2px solid #888; border-radius: 10px; padding: 14px 18px 18px; color: #fff; font-family: sans-serif; position: relative; }
+    #invpanel h2 { margin: 0 0 2px; font-size: 18px; }
+    #invpanel .hint { font-size: 11px; opacity: 0.6; margin-bottom: 10px; max-width: 420px; }
+    #invclose { position: absolute; top: 8px; right: 10px; width: 30px; height: 30px; border: none; border-radius: 6px; background: #555; color: #fff; font-size: 18px; cursor: pointer; }
+    #invclose:hover { background: #777; }
+    #invpanel .cell { width: 44px; height: 44px; background: #555; border: 2px solid #6f6f6f; border-radius: 4px; position: relative; box-sizing: border-box; cursor: pointer; }
+    #invpanel .cell:hover { background: #6a6a6a; }
+    #invpanel .cell img { width: 36px; height: 36px; position: absolute; top: 2px; left: 2px; image-rendering: pixelated; pointer-events: none; }
+    #invpanel .cell .count { position: absolute; right: 2px; bottom: -1px; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; pointer-events: none; }
+    #invpanel .craftrow { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    #invpanel .cgrid { display: grid; gap: 4px; }
+    #invpanel .carrow { font-size: 22px; opacity: 0.7; }
+    #invpanel .cell.out { width: 52px; height: 52px; background: #3a3a3a; }
+    #invpanel .cell.out img { width: 44px; height: 44px; top: 2px; left: 2px; }
+    #invpanel .invmain, #invpanel .invhot { display: grid; grid-template-columns: repeat(9, 44px); gap: 4px; }
+    #invpanel .invhot { margin-top: 8px; padding-top: 8px; border-top: 1px solid #555; }
+    #invcursor { position: fixed; z-index: 120; width: 40px; height: 40px; pointer-events: none; transform: translate(-50%, -50%); display: none; }
+    #invcursor img { width: 36px; height: 36px; image-rendering: pixelated; }
+    #invcursor .count { position: absolute; right: 0; bottom: 0; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; }
   </style>
 </head>
 <body>
@@ -321,11 +342,12 @@
     <span class="pc-only">WASD: 移動  /  Space: ジャンプ<br>
     マウス: 視点  /  左クリック: 破壊  /  右クリック: 設置<br>
     Spaceダブルタップ: 飛行ON/OFF (飛行中 Space:上昇 / Shift:下降)<br>
-    1〜9: ブロック種類切替  /  M: BGMミュート  /  Esc: 一時停止<br></span>
+    1〜9: ホットバー選択  /  E: インベントリ(クラフト)  /  M: ミュート  /  Esc: 一時停止<br>
+    作業台を作って置く→右クリックで3×3クラフト。アイテムは64個までスタック<br></span>
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
-    下のバーをタップ: ブロック切替  /  クラフト: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14w ・ 店にチェスト/剣・盾ロゴ看板/カウンター奥の店員(右クリックで会話)</span>
+    下のバーをタップ: 選択  /  クラフト/インベントリ: 上のボタン<br></span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14x ・ 本格クラフト＋フルインベントリ(36枠)＋スタック上限(64)＋作業台/3×3</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -486,6 +508,10 @@
       { name: '耕地',       color: 0x5D3A1C, tex: farmlandTexURI(), icon: farmlandTexURI(), hardness: 0.5, cap: 5000 },
       // チェスト (右クリックでアイテム保管)
       { name: 'チェスト',   color: 0x9A6B2F, tex: chestTexURI(), icon: chestTexURI(), hardness: 1.0, cap: 2000 },
+      // 作業台 (3×3クラフト。右クリックで開く)
+      { name: '作業台', color: 0x9A6B2F, hardness: 1.0, cap: 2000,
+        tex: "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><rect width='16' height='16' fill='#8a5a2b'/><rect x='1' y='1' width='14' height='14' fill='#9a6b2f'/><rect x='2' y='2' width='5' height='5' fill='#caa24a'/><rect x='9' y='2' width='5' height='5' fill='#b07c2e'/><rect x='2' y='9' width='5' height='5' fill='#b07c2e'/><rect x='9' y='9' width='5' height='5' fill='#caa24a'/><rect x='7' y='1' width='2' height='14' fill='#5a3c1c'/><rect x='1' y='7' width='14' height='2' fill='#5a3c1c'/></svg>"),
+        icon: "data:image/svg+xml," + encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16'><rect width='16' height='16' fill='#8a5a2b'/><rect x='1' y='1' width='14' height='14' fill='#9a6b2f'/><rect x='2' y='2' width='5' height='5' fill='#caa24a'/><rect x='9' y='2' width='5' height='5' fill='#b07c2e'/><rect x='2' y='9' width='5' height='5' fill='#b07c2e'/><rect x='9' y='9' width='5' height='5' fill='#caa24a'/><rect x='7' y='1' width='2' height='14' fill='#5a3c1c'/><rect x='1' y='7' width='14' height='2' fill='#5a3c1c'/></svg>") },
     ];
     let selectedSlot = 0;       // ホットバー(所持品リスト)内の選択位置
     let craftingOpen = false;   // クラフトメニュー表示中フラグ
@@ -499,6 +525,7 @@
     const BED_INDEX         = blockTypes.findIndex((b) => b.name === 'ベッド');
     const FARMLAND_INDEX    = blockTypes.findIndex((b) => b.name === '耕地');
     const CHEST_INDEX       = blockTypes.findIndex((b) => b.name === 'チェスト');
+    const CRAFT_INDEX       = blockTypes.findIndex((b) => b.name === '作業台');
     const GRASS_INDEX = 0, DIRT_INDEX = 1;
 
     // マテリアル生成: 単一テクスチャ or 6面別テクスチャ
@@ -542,9 +569,64 @@
       }
     });
 
-    // ===== インベントリ & ホットバー =====
-    const inventory = blockTypes.map(() => 0);  // 各ブロックの所持数 (初期0)
-    let tntCount = 0;  // TNT所持数 (初期は0。クラフトで入手可。初期装備は銅の剣)
+    // ===== インベントリ & ホットバー (本家準拠のスロット式・スタック上限あり) =====
+    // 全アイテムを文字列キーで扱う: ブロック='b:<index>' / 素材='m:<id>' / 道具='t:<id>' / 'tnt'
+    // (防具は装備扱いで invSlots には入れない)
+    const INV_HOTBAR = 9, INV_MAIN = 27, INV_SIZE = INV_HOTBAR + INV_MAIN;  // 0..8=ホットバー, 9..35=メイン
+    const invSlots = new Array(INV_SIZE).fill(null);   // 各要素: null | { key, count }
+    function stackMax(key) {
+      if (key === 'tnt') return 64;
+      const k = key[0];
+      return (k === 't' || k === 'a') ? 1 : 64;        // 道具/防具=1, ブロック/素材=64
+    }
+    function countItem(key) {
+      let n = 0;
+      for (const s of invSlots) if (s && s.key === key) n += s.count;
+      return n;
+    }
+    // n個追加。詰め切れなかった残り(overflow)を返す
+    function addItem(key, n) {
+      const max = stackMax(key);
+      for (const s of invSlots) {                       // 1) 既存スタックに詰める
+        if (n <= 0) break;
+        if (s && s.key === key && s.count < max) { const a = Math.min(max - s.count, n); s.count += a; n -= a; }
+      }
+      for (let i = 0; i < INV_SIZE && n > 0; i++) {      // 2) 空きスロットへ
+        if (!invSlots[i]) { const a = Math.min(max, n); invSlots[i] = { key, count: a }; n -= a; }
+      }
+      return n;
+    }
+    // n個取り出す。実際に取れた数を返す (後ろ=メインから消費)
+    function takeItem(key, n) {
+      let taken = 0;
+      for (let i = INV_SIZE - 1; i >= 0 && n > 0; i--) {
+        const s = invSlots[i];
+        if (s && s.key === key) { const t = Math.min(s.count, n); s.count -= t; n -= t; taken += t; if (s.count <= 0) invSlots[i] = null; }
+      }
+      return taken;
+    }
+    // 選択中ホットバースロットから n個消費 (設置・食事など手持ちを使う用)。成功で true
+    function consumeSelected(n) {
+      const s = invSlots[selectedSlot];
+      if (!s || s.count < (n || 1)) return false;
+      s.count -= (n || 1);
+      if (s.count <= 0) invSlots[selectedSlot] = null;
+      return true;
+    }
+    // 旧コード互換: inventory[blockIndex] / materials[id] / ownedTools[id] を invSlots へ橋渡し
+    function _reconcile(key, val) { const cur = countItem(key); if (val > cur) addItem(key, val - cur); else if (val < cur) takeItem(key, cur - val); }
+    const _numRe = /^\d+$/;
+    const inventory = new Proxy({}, {
+      get(t, p) { if (p === 'length') return blockTypes.length; if (typeof p === 'string' && _numRe.test(p)) return countItem('b:' + p); return Reflect.get(t, p); },
+      set(t, p, v) { if (typeof p === 'string' && _numRe.test(p)) { _reconcile('b:' + p, v); return true; } return Reflect.set(t, p, v); },
+    });
+    const materials = new Proxy({}, {
+      get(t, p) { if (typeof p === 'string' && p !== 'constructor') return countItem('m:' + p); return Reflect.get(t, p); },
+      set(t, p, v) { if (typeof p === 'string') { _reconcile('m:' + p, v); return true; } return Reflect.set(t, p, v); },
+    });
+    // TNT は専用キー 'tnt'。旧 tntCount 互換アクセサ
+    const tntCountGet = () => countItem('tnt');
+    let invOpen = false;   // インベントリ画面の表示中フラグ (早期参照のためここで宣言)
     // 一人称ビューで「手に持っているアイテム」の表示 (メッシュ実体は手の生成後に代入)
     let heldIconPlane = null;   // 道具・TNT 用のアイコン板
     let heldBlockCube = null;   // ブロック用の小立方体
@@ -640,7 +722,15 @@
 
     const toolById = {};
     TOOL_DEFS.forEach((t) => { toolById[t.id] = t; });
-    const ownedTools = { copper_sword: true };  // id -> true (道具は1個ずつ)。開始時は銅の剣を所持
+    // ownedTools[id] は invSlots の道具スロット(t:id)を裏に持つ Proxy。所持=スロットに1個ある
+    const ownedTools = new Proxy({}, {
+      get(t, p) { return typeof p === 'string' ? countItem('t:' + p) > 0 : Reflect.get(t, p); },
+      set(t, p, v) {
+        if (typeof p === 'string') { if (v && countItem('t:' + p) === 0) addItem('t:' + p, 1); else if (!v) takeItem('t:' + p, 999); return true; }
+        return Reflect.set(t, p, v);
+      },
+    });
+    addItem('t:copper_sword', 1);   // 開始時の装備: 銅の剣 (ホットバー先頭へ)
 
     // ===== 防具 — 本家準拠の被ダメージ軽減 (革=全身28% / 鉄=全身60% 相当) =====
     // 作ると自動で装備される。上位 (鉄) を持っていればそちらが優先。
@@ -883,6 +973,8 @@
       { id: 'sapling',  name: '苗木',       color: 0x4E8A3C, label: '苗' },
       // 花 (草原の花を採取すると入手する飾りアイテム)
       { id: 'flower',   name: '花',         color: 0xE87FB4, label: '花' },
+      // 棒 (木材2個からクラフト。道具/松明の材料)
+      { id: 'stick',    name: '棒',         color: 0x9a7b4f, label: '棒' },
     ];
     function matIcon(m) {
       const hex = '#' + m.color.toString(16).padStart(6, '0');
@@ -895,8 +987,8 @@
       );
     }
     const materialById = {};
-    const materials = {};
-    MATERIAL_DEFS.forEach((m) => { m.icon = m.icon || ITEM_ICONS[m.id] || matIcon(m); materialById[m.id] = m; materials[m.id] = 0; });
+    // materials は invSlots を裏に持つ Proxy (インベントリ節で宣言済み)
+    MATERIAL_DEFS.forEach((m) => { m.icon = m.icon || ITEM_ICONS[m.id] || matIcon(m); materialById[m.id] = m; });
 
     // モブ別ドロップ表 (min..max 個を一様乱数で。0 を含むものは出ないこともある)
     const MOB_DROPS = {
@@ -926,22 +1018,42 @@
     ORE_INFO[DIAMOND_ORE_INDEX] = { dropId: 'diamond', minTier: 3 };
 
     // ===== ホットバー: 所持しているブロック + 作成した道具のみ表示 =====
-    let hotbarItems = [];   // { kind:'block', i } | { kind:'tool', id } | { kind:'tnt' }
-    function itemKey(it) {
-      if (it.kind === 'block') return 'b' + it.i;
-      if (it.kind === 'tool') return 't' + it.id;
-      if (it.kind === 'material') return 'm' + it.id;
-      return 'tnt';
+    // ===== キー ⇄ 旧アイテム形式・アイコン/名前の解決 =====
+    function slotToItem(slot) {   // invSlot {key,count} → 旧形式 {kind, i|id} (既存コード互換)
+      if (!slot) return null;
+      const key = slot.key;
+      if (key === 'tnt') return { kind: 'tnt' };
+      const c = key.indexOf(':'), pre = key.slice(0, c), id = key.slice(c + 1);
+      if (pre === 'b') return { kind: 'block', i: +id };
+      if (pre === 'm') return { kind: 'material', id };
+      if (pre === 't') return { kind: 'tool', id };
+      return null;
     }
-    function computeHotbarItems() {
-      const items = [];
-      if (tntCount > 0) items.push({ kind: 'tnt' });  // 先頭に固定 (デフォルト所持)
-      blockTypes.forEach((b, i) => { if (inventory[i] > 0) items.push({ kind: 'block', i }); });
-      MATERIAL_DEFS.forEach((m) => { if (materials[m.id] > 0) items.push({ kind: 'material', id: m.id }); });
-      TOOL_DEFS.forEach((t) => { if (ownedTools[t.id]) items.push({ kind: 'tool', id: t.id }); });
-      return items;
+    function itemKey(it) {         // 旧形式 → invSlot キー
+      if (!it) return null;
+      if (it.kind === 'tnt') return 'tnt';
+      if (it.kind === 'block') return 'b:' + it.i;
+      if (it.kind === 'material') return 'm:' + it.id;
+      if (it.kind === 'tool') return 't:' + it.id;
+      return null;
     }
-    function selectedItem() { return hotbarItems[selectedSlot] || null; }
+    function keyIcon(key) {
+      if (key === 'tnt') return TNT_ICON;
+      const c = key.indexOf(':'), pre = key.slice(0, c), id = key.slice(c + 1);
+      if (pre === 'b') { const bt = blockTypes[+id]; return bt.icon || (typeof bt.tex === 'string' ? bt.tex : bt.tex[2]); }
+      if (pre === 'm') return materialById[id].icon;
+      if (pre === 't') return toolById[id].icon;
+      return '';
+    }
+    function keyName(key) {
+      if (key === 'tnt') return 'TNT';
+      const c = key.indexOf(':'), pre = key.slice(0, c), id = key.slice(c + 1);
+      if (pre === 'b') return blockTypes[+id].name;
+      if (pre === 'm') return materialById[id].name;
+      if (pre === 't') return toolById[id].name;
+      return key;
+    }
+    function selectedItem() { return slotToItem(invSlots[selectedSlot]); }
     function heldTool() { const it = selectedItem(); return it && it.kind === 'tool' ? toolById[it.id] : null; }
     function attackDamage() {
       const t = heldTool();
@@ -949,73 +1061,37 @@
       return PMOB_ATTACK_DAMAGE + (t ? t.attack : 0) + (t && t.type === 'sword' && enchants.sword ? 2 : 0);
     }
 
+    // ホットバー = invSlots[0..8] の9枠を常時表示 (空枠も枠として表示)
     function rebuildHotbar() {
       hotbarEl.innerHTML = '';
       slotEls.length = 0;
-      hotbarItems.forEach((it, idx) => {
+      for (let idx = 0; idx < INV_HOTBAR; idx++) {
         const slot = document.createElement('div');
         slot.className = 'slot';
-        const k = document.createElement('span');
-        k.className = 'key';
-        k.textContent = idx < 9 ? (idx + 1) : '';
-        slot.appendChild(k);
-        const img = document.createElement('img');
-        if (it.kind === 'block') {
-          const bt = blockTypes[it.i];
-          img.src = bt.icon || (typeof bt.tex === 'string' ? bt.tex : bt.tex[2]);
-          img.alt = bt.name;
-        } else if (it.kind === 'tnt') {
-          img.src = TNT_ICON; img.alt = 'TNT';
-        } else if (it.kind === 'material') {
-          const m = materialById[it.id];
-          img.src = m.icon; img.alt = m.name;
-        } else {
-          const t = toolById[it.id];
-          img.src = t.icon; img.alt = t.name;
-        }
-        slot.appendChild(img);
-        const cnt = document.createElement('span');
-        cnt.className = 'count';
-        slot.appendChild(cnt);
+        const k = document.createElement('span'); k.className = 'key'; k.textContent = idx + 1; slot.appendChild(k);
+        const img = document.createElement('img'); slot.appendChild(img);
+        const cnt = document.createElement('span'); cnt.className = 'count'; slot.appendChild(cnt);
         hotbarEl.appendChild(slot);
-        slotEls.push({ slot, count: cnt });
-        const selectThis = (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          selectedSlot = idx;
-          updateBlockInfo();
-          refreshHotbarCounts();
-        };
+        slotEls.push({ slot, img, count: cnt });
+        const selectThis = (e) => { e.preventDefault(); e.stopPropagation(); selectedSlot = idx; updateBlockInfo(); refreshHotbarCounts(); };
         slot.addEventListener('click', selectThis);
         slot.addEventListener('touchstart', selectThis, { passive: false });
-      });
+      }
       refreshHotbarCounts();
     }
     function refreshHotbarCounts() {
-      slotEls.forEach((els, idx) => {
-        const it = hotbarItems[idx];
-        if (!it) return;
-        els.count.textContent = it.kind === 'block' ? (inventory[it.i] > 0 ? inventory[it.i] : '')
-                              : it.kind === 'material' ? materials[it.id]
-                              : (it.kind === 'tnt' ? tntCount : '');
+      for (let idx = 0; idx < slotEls.length; idx++) {
+        const els = slotEls[idx], s = invSlots[idx];
+        if (s) { els.img.src = keyIcon(s.key); els.img.alt = keyName(s.key); els.img.style.display = ''; els.count.textContent = s.count > 1 ? s.count : ''; }
+        else { els.img.removeAttribute('src'); els.img.style.display = 'none'; els.count.textContent = ''; }
         els.slot.classList.toggle('selected', idx === selectedSlot);
-      });
+      }
       updateHeldItem();  // 手に持つアイテムの見た目を選択に同期 (初期化中は内部で no-op)
     }
-    let _hotbarSig = null;
     function updateHotbar() {
-      const prevKey = selectedItem() ? itemKey(selectedItem()) : null;
-      hotbarItems = computeHotbarItems();
-      // 選択していたアイテムが残っていれば選択維持、無ければクランプ
-      if (prevKey) {
-        const idx = hotbarItems.findIndex((it) => itemKey(it) === prevKey);
-        selectedSlot = idx >= 0 ? idx : Math.min(selectedSlot, Math.max(0, hotbarItems.length - 1));
-      } else {
-        selectedSlot = Math.min(selectedSlot, Math.max(0, hotbarItems.length - 1));
-      }
-      const sig = hotbarItems.map(itemKey).join('|');
-      if (sig !== _hotbarSig) { _hotbarSig = sig; rebuildHotbar(); }
-      else { refreshHotbarCounts(); }
+      if (slotEls.length === 0) rebuildHotbar();   // 初回は9枠を生成
+      else refreshHotbarCounts();
+      if (typeof refreshInventoryPanel === 'function' && invOpen) refreshInventoryPanel();
     }
 
     // ===== クラフト処理 =====
@@ -1036,7 +1112,7 @@
     const ITEM_RECIPES = [
       { id: 'tnt', name: 'TNT', icon: TNT_ICON,
         costs: [{ kind: 'material', id: 'gunpowder', qty: 2 }, { kind: 'block', i: blockIndexByName['砂'], qty: 3 }],
-        make() { tntCount += 1; } },
+        make() { addItem('tnt', 1); } },
       { id: 'furnace', name: 'かまど', icon: furnaceTexURI(),
         costs: [{ kind: 'block', i: blockIndexByName['石'], qty: 8 }],
         make() { inventory[blockIndexByName['かまど']] += 1; } },
@@ -1049,6 +1125,12 @@
       { id: 'chest', name: 'チェスト', icon: chestTexURI(),
         costs: [{ kind: 'block', i: blockIndexByName['木材'], qty: 8 }],
         make() { inventory[blockIndexByName['チェスト']] += 1; } },
+      { id: 'stick', name: '棒 ×4', icon: materialById.stick.icon,
+        costs: [{ kind: 'block', i: blockIndexByName['木材'], qty: 2 }],
+        make() { addItem('m:stick', 4); } },
+      { id: 'crafttable', name: '作業台', icon: blockTypes[CRAFT_INDEX].icon,
+        costs: [{ kind: 'block', i: blockIndexByName['木材'], qty: 4 }],
+        make() { addItem('b:' + CRAFT_INDEX, 1); } },
       { id: 'bread', name: 'パン', icon: null,
         costs: [{ kind: 'material', id: 'wheat', qty: 3 }],
         make() { materials.bread += 1; } },
@@ -1099,7 +1181,7 @@
     craftBtnEl.id = 'craftbtn';
     craftBtnEl.textContent = 'クラフト';
     document.body.appendChild(craftBtnEl);
-    const toggleCraft = (e) => { e.preventDefault(); e.stopPropagation(); craftingOpen ? closeCrafting(true) : openCrafting(); };
+    const toggleCraft = (e) => { e.preventDefault(); e.stopPropagation(); invOpen ? closeInventory(true) : openInventory(2); };  // ボタン=インベントリ(2×2クラフト付き)。モバイルでも開ける
     craftBtnEl.addEventListener('click', toggleCraft);
     craftBtnEl.addEventListener('touchstart', toggleCraft, { passive: false });
 
@@ -1209,6 +1291,210 @@
       }
     }
 
+    // ===== 本格クラフト: レシピ照合エンジン (形状/無形状) =====
+    const RK = {
+      wood: 'b:' + blockIndexByName['木材'], stone: 'b:' + blockIndexByName['石'], sand: 'b:' + blockIndexByName['砂'],
+      stick: 'm:stick', coal: 'm:coal', iron: 'm:iron', gp: 'm:gunpowder', wheat: 'm:wheat', feather: 'm:feather',
+      craft: 'b:' + CRAFT_INDEX, furnace: 'b:' + FURNACE_INDEX, chest: 'b:' + CHEST_INDEX,
+      torch: 'm:torch', tnt: 'tnt', arrow: 'm:arrow', bread: 'm:bread',
+    };
+    const RECIPES = [];
+    function _trimRows(rows) {   // パターンの余白(null行/列)を削って最小バウンディングボックスにする
+      let minR = 99, maxR = -1, minC = 99, maxC = -1;
+      for (let r = 0; r < rows.length; r++) for (let c = 0; c < rows[r].length; c++) if (rows[r][c]) { minR = Math.min(minR, r); maxR = Math.max(maxR, r); minC = Math.min(minC, c); maxC = Math.max(maxC, c); }
+      const t = []; for (let r = minR; r <= maxR; r++) { const row = []; for (let c = minC; c <= maxC; c++) row.push(rows[r][c] || null); t.push(row); }
+      return t;
+    }
+    const _shaped = (rows, out, n) => RECIPES.push({ rows: _trimRows(rows), out, n: n || 1, shaped: true });
+    const _shapeless = (items, out, n) => RECIPES.push({ items: items.slice().sort(), out, n: n || 1, shaped: false });
+    _shapeless([RK.wood, RK.wood], RK.stick, 4);
+    _shaped([[RK.wood, RK.wood], [RK.wood, RK.wood]], RK.craft, 1);
+    _shaped([[RK.coal], [RK.stick]], RK.torch, 4);
+    _shaped([[RK.stone, RK.stone, RK.stone], [RK.stone, null, RK.stone], [RK.stone, RK.stone, RK.stone]], RK.furnace, 1);
+    _shaped([[RK.wood, RK.wood, RK.wood], [RK.wood, null, RK.wood], [RK.wood, RK.wood, RK.wood]], RK.chest, 1);
+    _shaped([[RK.gp, RK.sand, RK.gp], [RK.sand, RK.gp, RK.sand], [RK.gp, RK.sand, RK.gp]], RK.tnt, 1);
+    _shapeless([RK.wheat, RK.wheat, RK.wheat], RK.bread, 1);
+    _shaped([[RK.stone], [RK.stick], [RK.feather]], RK.arrow, 4);
+    for (const tier of ['wood', 'stone', 'iron']) {
+      const M = ({ wood: RK.wood, stone: RK.stone, iron: RK.iron })[tier], S = RK.stick;
+      _shaped([[M, M, M], [null, S, null], [null, S, null]], 't:' + tier + '_pickaxe', 1);
+      _shaped([[M, M, null], [M, S, null], [null, S, null]], 't:' + tier + '_axe', 1);
+      _shaped([[null, M, null], [null, S, null], [null, S, null]], 't:' + tier + '_shovel', 1);
+      _shaped([[M, M, null], [null, S, null], [null, S, null]], 't:' + tier + '_hoe', 1);
+      _shaped([[null, M, null], [null, M, null], [null, S, null]], 't:' + tier + '_sword', 1);
+    }
+    function _gridEq(a, b) {
+      if (a.length !== b.length || a[0].length !== b[0].length) return false;
+      for (let r = 0; r < a.length; r++) for (let c = 0; c < a[0].length; c++) if ((a[r][c] || null) !== (b[r][c] || null)) return false;
+      return true;
+    }
+    // クラフトグリッド(flat長 n*n の key|null)からレシピ照合 → {out,n} | null
+    function matchRecipe(cells, n) {
+      let minR = 99, maxR = -1, minC = 99, maxC = -1, total = 0;
+      for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (cells[r * n + c]) { total++; minR = Math.min(minR, r); maxR = Math.max(maxR, r); minC = Math.min(minC, c); maxC = Math.max(maxC, c); }
+      if (total === 0) return null;
+      const H = maxR - minR + 1, W = maxC - minC + 1, trim = [];
+      for (let r = 0; r < H; r++) { const row = []; for (let c = 0; c < W; c++) row.push(cells[(minR + r) * n + (minC + c)] || null); trim.push(row); }
+      const mirror = trim.map((row) => row.slice().reverse());
+      const multiset = cells.filter(Boolean).slice().sort();
+      for (const R of RECIPES) {
+        if (R.shaped) { if (_gridEq(trim, R.rows) || _gridEq(mirror, R.rows)) return { out: R.out, n: R.n }; }
+        else if (R.items.length === multiset.length && R.items.every((k, i) => k === multiset[i])) return { out: R.out, n: R.n };
+      }
+      return null;
+    }
+
+    // ===== インベントリ/クラフト画面 (36枠 + N×Nクラフトグリッド) =====
+    // invOpen は updateHotbar/anyUIOpen から早期参照されるためインベントリ節の冒頭で宣言済み
+    let invGridN = 2;                 // 現在のクラフトグリッド辺 (2=インベントリ内, 3=作業台)
+    let cursorStack = null;           // カーソルに持っているスタック {key,count}
+    let craftCells = [];              // クラフト入力スロット (長さ n*n, key|null の {key,count})
+    let craftOut = null;              // 出力 {out,n} | null
+
+    const invPanelEl = document.createElement('div');
+    invPanelEl.id = 'invpanel';
+    invPanelEl.innerHTML =
+      '<div class="panel"><button id="invclose">×</button><h2 id="invtitle">インベントリ</h2>' +
+      '<button id="invtocraft" style="position:absolute;top:10px;right:48px;height:30px;padding:0 12px;border:none;border-radius:6px;background:#4a6;color:#fff;font-size:13px;cursor:pointer;">簡易作成</button>' +
+      '<div class="hint">クリックで持つ/置く・右クリックで1個ずつ・Shift+クリックで素早く移動。クラフト枠に材料を本家のレシピ通りに並べると右に完成品が出る。</div>' +
+      '<div class="craftrow"><div class="cgrid" id="invcraftgrid"></div><div class="carrow">▶</div><div class="cell out" id="invcraftout"></div></div>' +
+      '<div class="invmain" id="invmain"></div><div class="invhot" id="invhot"></div></div>';
+    document.body.appendChild(invPanelEl);
+    const invMainEl = invPanelEl.querySelector('#invmain');
+    const invHotEl = invPanelEl.querySelector('#invhot');
+    const invCraftGridEl = invPanelEl.querySelector('#invcraftgrid');
+    const invCraftOutEl = invPanelEl.querySelector('#invcraftout');
+    invPanelEl.querySelector('#invclose').addEventListener('click', () => closeInventory(true));
+    invPanelEl.addEventListener('contextmenu', (e) => e.preventDefault());
+    // 「簡易作成」: インベントリを閉じて1クリックのレシピ一覧(旧メニュー)を開く
+    invPanelEl.querySelector('#invtocraft').addEventListener('click', () => {
+      if (cursorStack) { addItem(cursorStack.key, cursorStack.count); cursorStack = null; }
+      for (let i = 0; i < craftCells.length; i++) if (craftCells[i]) { addItem(craftCells[i].key, craftCells[i].count); craftCells[i] = null; }
+      invOpen = false; invPanelEl.style.display = 'none'; cursorEl.style.display = 'none'; updateHotbar();
+      openCrafting();
+    });
+
+    const cursorEl = document.createElement('div');
+    cursorEl.id = 'invcursor'; cursorEl.innerHTML = '<img><span class="count"></span>';
+    document.body.appendChild(cursorEl);
+    addEventListener('mousemove', (e) => { if (invOpen) { cursorEl.style.left = e.clientX + 'px'; cursorEl.style.top = e.clientY + 'px'; } });
+
+    const _mainCells = [], _hotCells = [], _craftUICells = [];
+    function _makeCell(parent, onDown) {
+      const d = document.createElement('div'); d.className = 'cell';
+      const img = document.createElement('img'); const cnt = document.createElement('span'); cnt.className = 'count';
+      d.appendChild(img); d.appendChild(cnt); parent.appendChild(d);
+      d.addEventListener('mousedown', onDown);
+      return { el: d, img, cnt };
+    }
+    function _paint(cell, slot) {
+      if (slot) { cell.img.src = keyIcon(slot.key); cell.img.style.display = ''; cell.cnt.textContent = slot.count > 1 ? slot.count : ''; }
+      else { cell.img.removeAttribute('src'); cell.img.style.display = 'none'; cell.cnt.textContent = ''; }
+    }
+    // 36枠とクラフトUIのセルを一度だけ生成
+    (function buildInventoryCells() {
+      for (let i = 0; i < INV_MAIN; i++) { const idx = INV_HOTBAR + i; _mainCells.push(_makeCell(invMainEl, (e) => clickInvSlot(idx, e))); }
+      for (let i = 0; i < INV_HOTBAR; i++) { _hotCells.push(_makeCell(invHotEl, (e) => clickInvSlot(i, e))); }
+      for (let i = 0; i < 9; i++) { _craftUICells.push(_makeCell(invCraftGridEl, (e) => clickCraftSlot(i, e))); }
+      invCraftOutEl.innerHTML = '<img><span class="count"></span>';
+      invCraftOutEl._cell = { img: invCraftOutEl.querySelector('img'), cnt: invCraftOutEl.querySelector('.count') };
+      invCraftOutEl.addEventListener('mousedown', (e) => { e.preventDefault(); clickOutput(); });
+    })();
+
+    function renderInventory() {
+      for (let i = 0; i < INV_MAIN; i++) _paint(_mainCells[i], invSlots[INV_HOTBAR + i]);
+      for (let i = 0; i < INV_HOTBAR; i++) _paint(_hotCells[i], invSlots[i]);
+      const N = invGridN;
+      invCraftGridEl.style.gridTemplateColumns = `repeat(${N}, 44px)`;
+      for (let i = 0; i < 9; i++) {
+        const used = i < N * N;
+        _craftUICells[i].el.style.display = used ? '' : 'none';
+        if (used) _paint(_craftUICells[i], craftCells[i]);
+      }
+      _paint(invCraftOutEl._cell, craftOut ? { key: craftOut.out, count: craftOut.n } : null);
+      // カーソル表示
+      if (cursorStack) { cursorEl.style.display = 'block'; cursorEl.querySelector('img').src = keyIcon(cursorStack.key); cursorEl.querySelector('.count').textContent = cursorStack.count > 1 ? cursorStack.count : ''; }
+      else cursorEl.style.display = 'none';
+      refreshHotbarCounts();
+    }
+    function recomputeCraft() {
+      const flat = []; for (let i = 0; i < invGridN * invGridN; i++) flat.push(craftCells[i] ? craftCells[i].key : null);
+      craftOut = matchRecipe(flat, invGridN);
+    }
+    // 共通: cursorStack と任意のスロット配列(arr[idx]) のクリック処理 (右=1個ずつ)
+    function _slotClick(arr, idx, right, afterCraft) {
+      const slot = arr[idx];
+      if (!cursorStack) {
+        if (!slot) return;
+        if (right) { const half = Math.ceil(slot.count / 2); cursorStack = { key: slot.key, count: half }; slot.count -= half; if (slot.count <= 0) arr[idx] = null; }
+        else { cursorStack = slot; arr[idx] = null; }
+      } else if (!slot) {
+        if (right) { arr[idx] = { key: cursorStack.key, count: 1 }; if (--cursorStack.count <= 0) cursorStack = null; }
+        else { arr[idx] = cursorStack; cursorStack = null; }
+      } else if (slot.key === cursorStack.key) {
+        const max = stackMax(slot.key), add = Math.min(right ? 1 : cursorStack.count, max - slot.count, cursorStack.count);
+        slot.count += add; cursorStack.count -= add; if (cursorStack.count <= 0) cursorStack = null;
+      } else { arr[idx] = cursorStack; cursorStack = slot; }    // 入れ替え
+      if (afterCraft) recomputeCraft();
+    }
+    function clickInvSlot(idx, e) {
+      e.preventDefault();
+      if (e.shiftKey) { quickMoveInv(idx); renderInventory(); return; }
+      _slotClick(invSlots, idx, e.button === 2);
+      renderInventory();
+    }
+    function clickCraftSlot(i, e) {
+      e.preventDefault();
+      if (e.shiftKey && craftCells[i]) { addItem(craftCells[i].key, craftCells[i].count); craftCells[i] = null; recomputeCraft(); renderInventory(); return; }
+      _slotClick(craftCells, i, e.button === 2, true);
+      renderInventory();
+    }
+    function clickOutput() {
+      if (!craftOut) return;
+      const max = stackMax(craftOut.out);
+      if (cursorStack && (cursorStack.key !== craftOut.out || cursorStack.count + craftOut.n > max)) return;
+      for (let i = 0; i < invGridN * invGridN; i++) if (craftCells[i]) { if (--craftCells[i].count <= 0) craftCells[i] = null; }  // 材料を1セット消費
+      if (!cursorStack) cursorStack = { key: craftOut.out, count: craftOut.n }; else cursorStack.count += craftOut.n;
+      recomputeCraft();
+      renderInventory();
+    }
+    // Shift+クリック: ホットバー↔メイン へ素早く移動
+    function quickMoveInv(idx) {
+      const slot = invSlots[idx]; if (!slot) return;
+      const toMain = idx < INV_HOTBAR, lo = toMain ? INV_HOTBAR : 0, hi = toMain ? INV_SIZE : INV_HOTBAR, max = stackMax(slot.key);
+      for (let i = lo; i < hi && slot.count > 0; i++) { const s = invSlots[i]; if (s && s.key === slot.key && s.count < max) { const a = Math.min(max - s.count, slot.count); s.count += a; slot.count -= a; } }
+      for (let i = lo; i < hi && slot.count > 0; i++) if (!invSlots[i]) { const a = Math.min(max, slot.count); invSlots[i] = { key: slot.key, count: a }; slot.count -= a; }
+      if (slot.count <= 0) invSlots[idx] = null;
+    }
+    function openInventory(gridN) {
+      if (anyUIOpen()) return;
+      invGridN = gridN || 2; invOpen = true;
+      craftCells = new Array(9).fill(null); craftOut = null;
+      invPanelEl.querySelector('#invtitle').textContent = gridN === 3 ? '作業台' : 'インベントリ';
+      renderInventory();
+      invPanelEl.style.display = 'flex';
+      document.body.style.cursor = '';
+      mouseDown = false; primaryHeld = false;
+      breakProgress = 0; breakTargetKey = null;
+      if (breakBarEl) breakBarEl.style.display = 'none';
+      if (controls.isLocked && !usingFallback && document.pointerLockElement) controls.unlock();
+    }
+    function closeInventory(relock) {
+      if (!invOpen) return;
+      // カーソルとクラフト枠の中身をインベントリへ戻す (溢れは捨てない=その場ドロップ相当だが簡易にaddItem)
+      if (cursorStack) { addItem(cursorStack.key, cursorStack.count); cursorStack = null; }
+      for (let i = 0; i < craftCells.length; i++) if (craftCells[i]) { addItem(craftCells[i].key, craftCells[i].count); craftCells[i] = null; }
+      craftOut = null;
+      invOpen = false;
+      invPanelEl.style.display = 'none';
+      cursorEl.style.display = 'none';
+      updateHotbar();
+      if (usingFallback) { document.body.style.cursor = 'none'; }
+      else if (relock) { controls.lock(); }
+      else { startMsg.style.display = 'block'; }
+    }
+    function refreshInventoryPanel() { if (invOpen) renderInventory(); }
+
     // ===== かまど (精錬) — 本家準拠: 燃料を消費して生肉を焼き、原石をインゴットにする =====
     // 燃料はチャージ制: 石炭1個 = 8回ぶん、木材1個 = 1回ぶん (不足時に自動投入)
     const SMELT_RECIPES = [
@@ -1311,7 +1597,7 @@
       return chestData[k];
     }
 
-    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen || shopOpen; }
+    function anyUIOpen() { return craftingOpen || furnaceOpen || chestOpen || tradeOpen || shopOpen || invOpen; }
 
     // ===== 村人との取引 — 本家準拠: エメラルドを通貨に売り買いする =====
     let tradeOpen = false;
@@ -1429,7 +1715,7 @@
       if (it.kind === 'tool') {
         ownedTools[it.id] = true;
         updateHotbar();
-        const idx = hotbarItems.findIndex((h) => h.kind === 'tool' && h.id === it.id);  // 買った武器を即装備
+        let idx = -1; for (let s = 0; s < INV_HOTBAR; s++) if (invSlots[s] && invSlots[s].key === 't:' + it.id) { idx = s; break; }  // 買った武器を即装備
         if (idx >= 0) { selectedSlot = idx; updateBlockInfo(); refreshHotbarCounts(); }
       } else {
         ownedArmor[it.id] = true;
@@ -1522,9 +1808,9 @@
         materials[it.id] -= n;
         c.mats[it.id] = (c.mats[it.id] || 0) + n;
       } else if (it.kind === 'tnt') {
-        const n = Math.min(qty, tntCount);
+        const n = Math.min(qty, tntCountGet());
         if (n <= 0) return;
-        tntCount -= n;
+        takeItem('tnt', n);
         c.tnt += n;
       } else {
         return;   // 道具は収納不可
@@ -1567,7 +1853,7 @@
       }
       if (c.tnt > 0) {
         addCard(TNT_ICON, 'TNT', c.tnt, () => {
-          tntCount += c.tnt; c.tnt = 0;
+          addItem('tnt', c.tnt); c.tnt = 0;
           saveChests(); updateHotbar(); refreshChestPanel();
         });
       }
@@ -3286,7 +3572,8 @@
       if (chestOpen) { if (e.code === 'Escape') closeChest(false); else if (e.code === 'KeyE') closeChest(true); return; }
       if (tradeOpen) { if (e.code === 'Escape') closeTrade(false); else if (e.code === 'KeyE') closeTrade(true); return; }
       if (shopOpen) { if (e.code === 'Escape') closeShop(false); else if (e.code === 'KeyE') closeShop(true); return; }
-      if (e.code === 'KeyE') { craftingOpen ? closeCrafting(true) : openCrafting(); return; }
+      if (invOpen) { if (e.code === 'Escape') closeInventory(false); else if (e.code === 'KeyE') closeInventory(true); return; }
+      if (e.code === 'KeyE') { openInventory(2); return; }    // E = インベントリ(2×2クラフト付き)。1クリック作成は「クラフト」ボタン
       if (craftingOpen) { if (e.code === 'Escape') closeCrafting(false); return; }
       if (e.code === 'KeyW') {
         if (!move.f) {  // 初回押し (キーリピートは無視)
@@ -3314,7 +3601,7 @@
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') move.down = true;
       if (e.code.startsWith('Digit')) {
         const idx = parseInt(e.code.slice(5)) - 1;
-        if (idx >= 0 && idx < hotbarItems.length) {
+        if (idx >= 0 && idx < INV_HOTBAR) {
           selectedSlot = idx;
           updateBlockInfo();
           refreshHotbarCounts();
@@ -3334,9 +3621,9 @@
     });
     // マウスホイールでホットバー(所持品)を巡回
     addEventListener('wheel', (e) => {
-      if (!controls.isLocked || anyUIOpen() || hotbarItems.length === 0) return;
+      if (!controls.isLocked || anyUIOpen()) return;
       const dir = e.deltaY > 0 ? 1 : -1;
-      selectedSlot = (selectedSlot + dir + hotbarItems.length) % hotbarItems.length;
+      selectedSlot = (selectedSlot + dir + INV_HOTBAR) % INV_HOTBAR;
       updateBlockInfo();
       refreshHotbarCounts();
     }, { passive: true });
@@ -3596,6 +3883,7 @@
         // 武器屋/防具屋のカウンターを右クリック → ショップを開く
         if (shopCounters.has(info.posKey)) { openShop(shopCounters.get(info.posKey)); return; }
         // かまどを右クリック → 精錬メニューを開く (本家準拠の対話)
+        if (info.typeIndex === CRAFT_INDEX) { openInventory(3); return; }   // 作業台 → 3×3クラフト
         if (info.typeIndex === FURNACE_INDEX) { openFurnace(); return; }
         // ベッドを右クリック → 就寝 (夜スキップ + リスポーン設定)
         if (info.typeIndex === BED_INDEX) { trySleepInBed(info); return; }
@@ -3614,7 +3902,7 @@
         const selM = selectedItem();
         if (selM && selM.kind === 'material' && selM.id === 'seeds' && info.typeIndex === FARMLAND_INDEX) {
           if (materials.seeds > 0 && plantCrop(info.x, info.y + 1, info.z)) {
-            materials.seeds--;
+            consumeSelected(1);
             updateHotbar();
             startHandSwing();
           }
@@ -3624,7 +3912,7 @@
         if (selM && selM.kind === 'material' && selM.id === 'sapling' &&
             (info.typeIndex === GRASS_INDEX || info.typeIndex === DIRT_INDEX)) {
           if (materials.sapling > 0 && plantSapling(info.x, info.y + 1, info.z)) {
-            materials.sapling--;
+            consumeSelected(1);
             updateHotbar();
             startHandSwing();
           }
@@ -3638,16 +3926,16 @@
         const py = Math.round(info.y + n.y);
         const pz = Math.round(info.z + n.z);
         if (it.kind === 'tnt') {
-          if (tntCount <= 0) return;
+          if (tntCountGet() <= 0) return;
           placePrimedTNT(px, py, pz);  // 設置 → 導火線開始 (本家同様)
-          tntCount--;
+          consumeSelected(1);
           updateHotbar();
           startHandSwing();
         } else if (it.kind === 'material' && it.id === 'torch') {
           // 松明の設置 (壁クリック時は壁掛け風)
           if (materials.torch <= 0) return;
           if (placeTorch(px, py, pz, n)) {
-            materials.torch--;
+            consumeSelected(1);
             updateHotbar();
             startHandSwing();
           }
@@ -3656,7 +3944,7 @@
           const bi = it.i;
           if (addBlock(px, py, pz, bi)) {
             recordEdit(px, py, pz, bi);  // 改変として記録 (戻っても残る)
-            inventory[bi]--;
+            consumeSelected(1);          // 手に持っているスロットから1個消費
             updateHotbar();
             startHandSwing();
             if (bi === WATER_INDEX || bi === LAVA_INDEX) flowFrom([key(px, py, pz)]);  // 設置した流体が流れ出す
@@ -7545,7 +7833,7 @@
       if (playerHP <= 0 || playerHunger >= HUNGER_MAX) return false;
       playerHunger = Math.min(HUNGER_MAX, playerHunger + m.food);
       updateHungerDisplay();
-      materials[sel.id]--;
+      consumeSelected(1);
       updateHotbar();
       startHandSwing();
       return true;
@@ -8021,9 +8309,9 @@
               // チェストを壊したら中身はプレイヤーの持ち物へ戻る
               if (info.typeIndex === CHEST_INDEX && chestData[info.posKey]) {
                 const c = chestData[info.posKey];
-                for (const iStr in c.blocks) inventory[+iStr] += c.blocks[iStr];
-                for (const id in c.mats) materials[id] += c.mats[id];
-                tntCount += c.tnt || 0;
+                for (const iStr in c.blocks) addItem('b:' + iStr, c.blocks[iStr]);
+                for (const id in c.mats) addItem('m:' + id, c.mats[id]);
+                addItem('tnt', c.tnt || 0);
                 delete chestData[info.posKey];
                 saveChests();
               }
