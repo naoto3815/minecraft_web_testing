@@ -336,6 +336,13 @@
     #invcursor { position: fixed; z-index: 120; width: 40px; height: 40px; pointer-events: none; transform: translate(-50%, -50%); display: none; }
     #invcursor img { width: 36px; height: 36px; image-rendering: pixelated; }
     #invcursor .count { position: absolute; right: 0; bottom: 0; font-size: 12px; font-weight: bold; color: #fff; text-shadow: 1px 1px 2px #000; }
+    /* 照準先の名称表示 (クロスヘアの上) */
+    #lookname {
+      position: fixed; left: 50%; top: 50%; transform: translate(-50%, -300%);
+      background: rgba(0,0,0,0.45); color: #fff; font-family: sans-serif; font-size: 15px; font-weight: bold;
+      padding: 3px 12px; border-radius: 8px; pointer-events: none; z-index: 40; display: none;
+      text-shadow: 1px 1px 2px #000; white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -349,7 +356,7 @@
     <span class="touch-only">左下スティック: 移動  /  画面右をなぞる: 視点<br>
     採掘/攻撃・設置/使う・ジャンプ・飛行・下降 ボタン<br>
     下のバーをタップ: 選択  /  クラフト/インベントリ: 上のボタン<br></span>
-    <span style="opacity:0.55; font-size:11px;">build 2026-06-14y ・ チェストをスロット式UIに統合(持ち物と並べてドラッグ移動)</span>
+    <span style="opacity:0.55; font-size:11px;">build 2026-06-14z ・ 照準を合わせた対象の名称を表示</span>
   </div>
   <div id="blockinfo">選択中: 草</div>
   <div id="timeinfo">
@@ -8081,12 +8088,67 @@
       }, { passive: false });
     }
 
+    // ===== 照準先の名称表示 (本家のF3/Bedrock相当: 見ている対象の名前を出す) =====
+    const lookNameEl = document.createElement('div');
+    lookNameEl.id = 'lookname';
+    document.body.appendChild(lookNameEl);
+    const LOOK_MOB_NAMES = {
+      pig: 'ブタ', cow: 'ウシ', chicken: 'ニワトリ', rabbit: 'ウサギ', horse: 'ウマ',
+      villager: '村人', steve: 'スティーブ', miner: 'マイナー', slime: 'スライム',
+      bubbleslime: 'バブルスライム', toto: 'トト',
+    };
+    let _lookAcc = 0, _lookLast = '';
+    function updateLookName(dt) {
+      _lookAcc += dt;
+      if (_lookAcc < 0.1) return;          // 約10Hzに間引き
+      _lookAcc = 0;
+      if (!controls.isLocked || anyUIOpen()) { if (lookNameEl.style.display !== 'none') lookNameEl.style.display = 'none'; return; }
+      raycaster.setFromCamera(centerScreen, camera);
+      let best = null, type = null, obj = null;
+      const consider = (hits, t) => { const h = hits[0]; if (h && (!best || h.distance < best.distance)) { best = h; type = t; obj = h.object; } };
+      consider(raycaster.intersectObjects(instancedMeshes, false), 'block');
+      consider(raycaster.intersectObjects(creepers, true), 'creeper');
+      consider(raycaster.intersectObjects(passiveColliders, false), 'passive');
+      consider(raycaster.intersectObjects(wardenColliders, false), 'warden');
+      consider(raycaster.intersectObjects(zombieColliders, false), 'zombie');
+      consider(raycaster.intersectObjects(skeletonColliders, false), 'skeleton');
+      consider(raycaster.intersectObjects(slimeKnightColliders, false), 'slimeknight');
+      consider(raycaster.intersectObjects(golemColliders, false), 'golem');
+      consider(raycaster.intersectObjects(fishColliders, false), 'fish');
+      consider(raycaster.intersectObjects(torchClickTargets, true), 'torch');
+      consider(raycaster.intersectObjects(cropClickTargets, true), 'crop');
+      consider(raycaster.intersectObjects(saplingClickTargets, true), 'sapling');
+      if (decorations.size) consider(raycaster.intersectObjects(Array.from(decorations.values()), true), 'plant');
+      let name = null;
+      if (best && best.distance <= 8) {
+        if (type === 'block') { const info = blockFromHit(best); if (info) name = blockTypes[info.typeIndex].name; }
+        else if (type === 'creeper') name = 'クリーパー';
+        else if (type === 'warden') name = 'ウォーデン';
+        else if (type === 'zombie') name = 'ゾンビ';
+        else if (type === 'skeleton') name = 'スケルトン';
+        else if (type === 'slimeknight') name = 'スライムナイト';
+        else if (type === 'golem') name = 'アイアンゴーレム';
+        else if (type === 'fish') name = '魚';
+        else if (type === 'torch') name = '松明';
+        else if (type === 'crop') name = '小麦';
+        else if (type === 'sapling') name = '苗木';
+        else if (type === 'passive') { let g = obj; while (g && !passiveMobs.includes(g)) g = g.parent; if (g) name = g.userData.shopType ? '店員' : (LOOK_MOB_NAMES[g.userData.def.key] || g.userData.def.key); }
+        else if (type === 'plant') { let g = obj; while (g && !g.userData.isDecoration) g = g.parent; name = (g && g.userData.plantType === 'flower') ? '花' : '草'; }
+      }
+      if (name) {
+        if (name !== _lookLast) { lookNameEl.textContent = name; _lookLast = name; }
+        if (lookNameEl.style.display !== 'block') lookNameEl.style.display = 'block';
+      } else if (lookNameEl.style.display !== 'none') { lookNameEl.style.display = 'none'; _lookLast = ''; }
+    }
+
     // ===== ゲームループ =====
     const clock = new THREE.Clock();
 
     function animate() {
       requestAnimationFrame(animate);
       const dt = Math.min(clock.getDelta(), 0.1);  // フレーム飛び対策
+
+      updateLookName(dt);   // 照準先の名称表示
 
       if (controls.isLocked && !anyUIOpen()) {
         const fwd = (move.f ? 1 : 0) - (move.b ? 1 : 0);
